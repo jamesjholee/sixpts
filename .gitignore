@@ -1,0 +1,7 @@
+.env
+data/*.parquet
+data/*.db
+data/board_w*.json
+web/node_modules
+web/dist
+__pycache__/

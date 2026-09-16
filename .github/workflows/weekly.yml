@@ -1,0 +1,25 @@
+name: weekly-board
+on:
+  schedule:
+    - cron: "0 11 * * 2"   # Tuesday 07:00 ET — after MNF data lands
+    - cron: "0 12 * * 4,6,0"  # Thu/Sat/Sun refresh (lines move)
+  workflow_dispatch:
+    inputs: { week: { description: "NFL week", required: true } }
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r requirements.txt
+      - name: Run engine
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          PF_COOKIE: ${{ secrets.PF_COOKIE }}
+        run: |
+          WEEK="${{ github.event.inputs.week }}"
+          if [ -z "$WEEK" ]; then WEEK=$(python -c "import datetime as d;print(max(1,(d.date.today()-d.date(2026,9,8)).days//7+1))"); fi
+          python -m engine.run_week --season 2026 --week $WEEK
+      - name: Publish public JSON to Pages branch
+        run: echo "wire to Vercel / Supabase storage — see README"
