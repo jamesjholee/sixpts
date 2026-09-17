@@ -12,9 +12,11 @@ data/*.pkl
 data/board_*.json
 data/board_*.csv
 data/teams_*.json
-data/upcoming_*.parquet
-data/pf_status_*.json
-data/props*.json
+# ...but ship the public boards: they are what the deployed API serves (nflverse-derived, no PropFinder fields)
 !data/board_w*_public.json
 !data/teams_w*.json
 !data/scorecard_w*.json
+data/upcoming_*.parquet
+data/pf_status_*.json
+data/props*.json
+dist-test

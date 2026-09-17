@@ -8,6 +8,8 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -29,12 +31,21 @@ jobs:
           WEEK="${{ github.event.inputs.week }}"
           if [ -z "$WEEK" ]; then WEEK=$(python -c "import datetime as d;print(max(1,(d.date.today()-d.date(2026,9,8)).days//7+1))"); fi
           if [ ! -f data/td_model.pkl ]; then python3 engine/build_training.py && python3 engine/fit_model.py; fi
-          if [ "$(date +%u)" = "2" ]; then python3 -m engine.grade --season 2026 --week $((WEEK-1)) || true; fi
+          if [ "$(date +%u)" = "2" ]; then python3 -m engine.score_card --season 2026 --week $((WEEK-1)) || true; python3 -m engine.grade --season 2026 --week $((WEEK-1)) || true; fi
           python3 engine/build_training.py --upcoming 2026 $WEEK
           python3 -m engine.score_week --season 2026 --week $WEEK
           python3 -m engine.team_profiles --season 2026 --week $WEEK
+          echo "WEEK=$WEEK" >> $GITHUB_ENV
           if [ -n "$PF_COOKIE" ]; then python3 -m engine.pf_odds --week $WEEK --live || true; fi
+      - name: Commit public boards so the deployed API serves them
+        run: |
+          git config user.name "sixpts-bot"; git config user.email "bot@sixpts.com"
+          git add -f data/board_w*_public.json data/teams_w*.json data/scorecard_w*.json || true
+          git diff --cached --quiet || (git commit -m "boards: week ${WEEK} [skip ci]" && git push)
       - name: Upload boards
         uses: actions/upload-artifact@v4
-        with: { name: boards-week-${{ github.run_id }}, path: "data/board_*.json
-data/teams_*.json" }
+        with:
+          name: boards-week-${{ github.run_id }}
+          path: |
+            data/board_*.json
+            data/teams_*.json
