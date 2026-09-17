@@ -6,7 +6,7 @@ Touchdown-first NFL prop research. Expected touchdowns from where every touch ha
 ```
 engine/   model.py (pure scoring), ingest.py (nflverse + PropFinder loaders, source-tagged), run_week.py (weekly job)
 api/      FastAPI — /api/board/{week} public, /api/private/board/{week} token-gated
-web/      Vite + React board (public by default; paste the private key to see PF-backed matchup notes)
+web/      Vite + React board (public by default; admin key unlocks stored prices and PF-backed notes)
 db/       Postgres schema with `source` on every fact table and public_* views that exclude PropFinder
 docs/     data-independence.md — how each PropFinder layer gets replaced
 data/     downloads, board JSONs (gitignored)
@@ -21,12 +21,13 @@ python3 engine/build_training.py                         # downloads 2021-2026 p
 python3 engine/fit_model.py                              # trains, prints 2025 holdout + calibration, saves data/td_model.pkl
 python3 engine/build_training.py --upcoming 2026 2       # walk-forward rows for the upcoming week
 python3 -m engine.score_week --season 2026 --week 2      # writes data/board_w2.json + board_w2_public.json
-python3 -m engine.team_profiles --season 2026 --week 2   # writes data/teams_w2.json (Teams tab)
+python3 -m engine.team_profiles --season 2026 --week 2   # writes data/teams_w2.json (Games tab)
 python3 engine/backtest.py                               # ablations, weekly table, leakage checks (run after any feature change)
 # (optional) formula model v1 for comparison:
 # python3 -m engine.run_week --season 2026 --week 2 --pf-json data/pf_team_defense_2025.json
 uvicorn api.main:app --reload --port 8000
 cd web && npm i && npm run dev     # http://localhost:5173/?week=2
+cd web && npm run check            # typecheck + renders the app in jsdom against data/*.json; run before every commit
 ```
 
 ## Data rules

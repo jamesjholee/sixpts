@@ -15,12 +15,33 @@ app.add_middleware(CORSMiddleware, allow_origins=os.environ.get("CORS_ORIGINS", 
 
 def _load(week: int, public: bool):
     f = DATA / (f"board_w{week}_public.json" if public else f"board_w{week}.json")
-    if not f.exists(): raise HTTPException(404, f"no board for week {week}")
+    if not f.exists():
+        import re
+        ws = sorted({int(m.group(1)) for x in DATA.glob("board_w*_public.json") if (m := re.search(r"board_w(\d+)_public", x.name))}, reverse=True)
+        raise HTTPException(404, detail={"message": f"Week {week} isn't published yet.", "latest": ws[0] if ws else None})
     return json.load(open(f))
+
+@app.get("/api/weeks")
+def weeks():
+    """Weeks that have a published board, newest first, so the app can open on the latest."""
+    import re
+    ws = sorted({int(m.group(1)) for f in DATA.glob("board_w*_public.json") if (m := re.search(r"board_w(\d+)_public", f.name))}, reverse=True)
+    return {"weeks": ws, "latest": ws[0] if ws else None}
 
 @app.get("/api/board/{week}")
 def public_board(week: int):
     return _load(week, public=True)
+
+class Evaluate(BaseModel):
+    week: int; prices: dict   # {"<gsis_id>|<game_id>": price}
+
+@app.post("/api/evaluate")
+def evaluate_public(body: Evaluate):
+    """Public: the model reasons over prices the visitor typed. Nothing is stored."""
+    board = {f"{r['gsis_id']}|{r['game_id']}": r for r in _load(body.week, public=True)["board"]}
+    cards = [evaluate(board[k], int(v), "your book") for k, v in body.prices.items() if k in board and v]
+    cards = rank(cards)
+    return {"week": body.week, "priced": len(cards), "bets": [c for c in cards if c["tier"] == "Bet"], "leans": [c for c in cards if c["tier"] == "Lean"], "passes": [c for c in cards if c["tier"] == "Pass"], "unpriced_top": []}
 
 @app.get("/api/private/board/{week}")
 def private_board(week: int, x_token: str = Header(default="")):
@@ -41,6 +62,20 @@ def add_odds(o: Odds, x_token: str = Header(default=""), authorization: str = He
         c.execute(text("insert into odds(gsis_id, game_id, market, line, book, price, source, user_id) values (:g,:ga,:m,:l,:b,:p,'manual',:u)"),
                   {"g": o.gsis_id, "ga": o.game_id, "m": o.market, "l": o.line, "b": o.book, "p": o.price, "u": None if uid == "admin" else uid})
     return {"ok": True}
+
+@app.get("/api/odds/{week}")
+def odds_for_week(week: int, market: str = "anytime_td", x_token: str = Header(default=""), authorization: str = Header(default="")):
+    """Latest price per player per book for the week. Private: PropFinder-sourced prices never render publicly."""
+    _user(x_token, authorization)
+    with ENGINE.begin() as c:
+        rows = c.execute(text("select gsis_id, game_id, book, price, fetched_at from odds where market=:m and game_id like :w order by fetched_at desc"),
+                         {"m": market, "w": f"%_{week:02d}_%"}).mappings().all()
+    out: dict = {}
+    for r in rows:
+        k = f"{r['gsis_id']}|{r['game_id']}"
+        out.setdefault(k, {})
+        if r["book"] not in out[k]: out[k][r["book"]] = r["price"]
+    return out
 
 @app.get("/api/model-picks/{week}")
 def model_picks(week: int, market: str = "anytime_td"):
@@ -64,7 +99,7 @@ def model_picks(week: int, market: str = "anytime_td"):
     cards = rank(cards)
     n_priced = sum(1 for c in cards if c["tier"] != "No price")
     return {"week": week, "market": market, "priced": n_priced, "bets": [c for c in cards if c["tier"] == "Bet"], "leans": [c for c in cards if c["tier"] == "Lean"],
-            "passes": [c for c in cards if c["tier"] == "Pass"][:25], "unpriced_top": [c for c in cards if c["tier"] == "No price"][:15],
+            "passes": [c for c in cards if c["tier"] == "Pass"], "unpriced_top": [c for c in cards if c["tier"] == "No price"][:15],
             "note": "The model only picks among players with a stored price. Enter prices on the board (they save when signed in) or connect an odds feed."}
 
 class Pick(BaseModel):

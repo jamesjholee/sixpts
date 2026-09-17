@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: sixpts-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: SIXPTS_DATA
+        value: data
+      - key: DATABASE_URL
+        sync: false
+      - key: SIXPTS_TOKEN
+        sync: false
+      - key: CORS_ORIGINS
+        value: https://sixpts.com,https://www.sixpts.com

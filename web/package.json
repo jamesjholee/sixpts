@@ -1,6 +1,29 @@
 {
-  "name": "sixpts-web", "private": true, "version": "0.1.0", "type": "module",
-  "scripts": { "dev": "vite", "build": "tsc -b && vite build", "preview": "vite preview" },
-  "dependencies": { "react": "^18.3.1", "react-dom": "^18.3.1", "@supabase/supabase-js": "^2.45.0" },
-  "devDependencies": { "@types/react": "^18.3.3", "@types/react-dom": "^18.3.0", "@vitejs/plugin-react": "^4.3.1", "typescript": "^5.5.3", "vite": "^5.3.4" }
+  "name": "sixpts-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "smoke": "esbuild src/App.tsx --bundle --format=esm --platform=node --outfile=dist-test/App.js --external:react --external:react-dom --external:@vercel/analytics --define:import.meta.env.VITE_API='\"\"' --define:import.meta.env.VITE_SUPABASE_URL='\"\"' --define:import.meta.env.VITE_SUPABASE_ANON_KEY='\"\"' --loader:.css=empty && node smoke.mjs",
+    "check": "tsc --noEmit && npm run smoke"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "@vercel/analytics": "^1.4.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.3.3",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.5.3",
+    "vite": "^5.3.4",
+    "esbuild": "^0.24.0"
+  }
 }
