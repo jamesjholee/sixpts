@@ -43,7 +43,7 @@ create table if not exists team_defense (
 
 create table if not exists odds (
   gsis_id text references players, game_id text references games, market text, line numeric, book text,
-  price int, fetched_at timestamptz default now(), source text not null,
+  price int, fetched_at timestamptz default now(), source text not null, user_id text,
   primary key (gsis_id, game_id, market, line, book, fetched_at)
 );
 
@@ -55,8 +55,9 @@ create table if not exists scores (
 );
 
 create table if not exists picks (
-  id bigserial primary key, gsis_id text, game_id text, market text, book text, price_taken int,
-  p_model numeric, stake_units numeric, placed_at timestamptz default now(), closing_price int, result text, clv numeric
+  id bigserial primary key, gsis_id text, game_id text, market text, player text, team text, opp text, line numeric,
+  book text, price_taken int, p_model numeric, stake_units numeric default 1, note text,
+  placed_at timestamptz default now(), closing_price int, result text, actual numeric, pnl_units numeric, clv numeric, user_id text
 );
 
 -- ---------- public-safe views (no PropFinder-sourced fields) ----------

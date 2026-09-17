@@ -16,7 +16,15 @@ data/     downloads, board JSONs (gitignored)
 ```
 python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
 cp .env.example .env
-python -m engine.run_week --season 2026 --week 2 --pf-json data/pf_team_defense_2025.json   # or --no-pf
+# fitted model (the one the board serves)
+python3 engine/build_training.py                         # downloads 2021-2026 pbp (~130 MB once), builds data/train.parquet
+python3 engine/fit_model.py                              # trains, prints 2025 holdout + calibration, saves data/td_model.pkl
+python3 engine/build_training.py --upcoming 2026 2       # walk-forward rows for the upcoming week
+python3 -m engine.score_week --season 2026 --week 2      # writes data/board_w2.json + board_w2_public.json
+python3 -m engine.team_profiles --season 2026 --week 2   # writes data/teams_w2.json (Teams tab)
+python3 engine/backtest.py                               # ablations, weekly table, leakage checks (run after any feature change)
+# (optional) formula model v1 for comparison:
+# python3 -m engine.run_week --season 2026 --week 2 --pf-json data/pf_team_defense_2025.json
 uvicorn api.main:app --reload --port 8000
 cd web && npm i && npm run dev     # http://localhost:5173/?week=2
 ```
@@ -31,7 +39,21 @@ cd web && npm i && npm run dev     # http://localhost:5173/?week=2
 - Web: Vercel, root `web/`, env `VITE_API` if API is on another host. Point sixpts.com CNAME at Vercel.
 - Cron: `.github/workflows/weekly.yml` (Tue build + Thu/Sat/Sun refresh). Secrets: DATABASE_URL, PF_COOKIE.
 
-## Model (v1)
+## Betting workflow (private key required)
+1. Board defaults to sort-by-edge. Type the book price (and the line for Receptions) -> edge shows; yellow flag = 3+ pts.
+2. "Log pick" posts to the DB with the price. At kickoff, record the closing price: `PATCH /api/picks/{id}/close {"closing_price": -160}` (or via the picks list).
+3. Tuesday: `python3 -m engine.grade --season 2026 --week N` -> won/lost, units, CLV. `GET /api/record` for the running record.
+Judge on CLV over 60+ picks, not on any single week.
+
+## Weekly rhythm
+- Tue: `build_training.py --upcoming <wk>` -> `score_week` -> `team_profiles`
+- Fri/Sat: re-run `score_week` once the week's injury report is in nflverse (board shows a banner until then) and lines have settled
+- Monthly: `build_training.py` (full) -> `fit_model.py` -> `backtest.py`
+
+## Model (v2)
+Gradient-boosted classifier, isotonic-calibrated, trained on 2021-2025 player-games (walk-forward features only). Layers: role (season-to-date shrunk to prior season), role trend (last 2 games vs season), offense identity, defense profile, game script, availability (injury report), environment. 2025 holdout: logloss 0.478, AUC 0.697, calibrated to ~2 pts through 60%.
+
+## Model (v1, formula)
 `P(TD) = 1 − e^(−xTD)`, `xTD = xTD_pg_shrunk × env_mult × matchup_mult`
 - xTD per touch: empirical TD rate by catch point (targets) / yardline (carries), fit on prior season
 - shrinkage: `(n·cur + k·prior)/(n+k)`, k=4 games (2 for new-team players)

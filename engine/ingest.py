@@ -17,7 +17,7 @@ def db():
 # ---------------- nflverse ----------------
 def nflverse_file(path: str, force: bool = False) -> pathlib.Path:
     out = DATA / pathlib.Path(path).name
-    if out.exists() and not force and time.time() - out.stat().st_mtime < 6 * 3600:
+    if out.exists() and (not force or time.time() - out.stat().st_mtime < 6 * 3600):
         return out
     r = requests.get(f"{NFLVERSE}/{path}", timeout=120); r.raise_for_status(); out.write_bytes(r.content); return out
 

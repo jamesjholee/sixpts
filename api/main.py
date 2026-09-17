@@ -3,6 +3,10 @@ Public routes read the *_public JSON / public_* views only — PropFinder fields
 import os, json, pathlib
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from sqlalchemy import create_engine, text
+from typing import Optional
+ENGINE = create_engine(os.environ.get("DATABASE_URL", "sqlite:///data/sixpts.db"))
 
 DATA = pathlib.Path(os.environ.get("SIXPTS_DATA", "data"))
 TOKEN = os.environ.get("SIXPTS_TOKEN")
@@ -22,6 +26,121 @@ def public_board(week: int):
 def private_board(week: int, x_token: str = Header(default="")):
     if not TOKEN or x_token != TOKEN: raise HTTPException(401, "private route")
     return _load(week, public=False)
+
+import sys; sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from engine.select_picks import evaluate, rank
+
+class Odds(BaseModel):
+    gsis_id: str; game_id: str; market: str = "anytime_td"; book: str = "book"; price: int; line: Optional[float] = None
+
+@app.post("/api/odds")
+def add_odds(o: Odds, x_token: str = Header(default=""), authorization: str = Header(default="")):
+    """Store a price you saw (or a feed writes here). Latest per player/market/book wins. Signed-in users' prices feed the shared model picks too."""
+    uid = _user(x_token, authorization)
+    with ENGINE.begin() as c:
+        c.execute(text("insert into odds(gsis_id, game_id, market, line, book, price, source, user_id) values (:g,:ga,:m,:l,:b,:p,'manual',:u)"),
+                  {"g": o.gsis_id, "ga": o.game_id, "m": o.market, "l": o.line, "b": o.book, "p": o.price, "u": None if uid == "admin" else uid})
+    return {"ok": True}
+
+@app.get("/api/model-picks/{week}")
+def model_picks(week: int, market: str = "anytime_td"):
+    """The model's picks with reasoning. Uses the best stored price per player; players without a price are listed as 'No price'."""
+    board = _load(week, public=True)["board"]
+    with ENGINE.begin() as c:
+        rows = c.execute(text("select gsis_id, game_id, book, price, fetched_at from odds where market=:m and game_id like :w order by fetched_at desc"),
+                         {"m": market, "w": f"%_{week:02d}_%"}).mappings().all()
+    latest = {}
+    for r in rows:                                   # latest per (player, book), then best price across books
+        k = (r["gsis_id"], r["game_id"], r["book"])
+        if k not in latest: latest[k] = r
+    best = {}
+    for (g, ga, b), r in latest.items():
+        k = (g, ga)
+        if k not in best or r["price"] > best[k]["price"]: best[k] = r
+    cards = []
+    for r in board:
+        o = best.get((r["gsis_id"], r["game_id"]))
+        cards.append(evaluate(r, o["price"] if o else None, o["book"] if o else ""))
+    cards = rank(cards)
+    n_priced = sum(1 for c in cards if c["tier"] != "No price")
+    return {"week": week, "market": market, "priced": n_priced, "bets": [c for c in cards if c["tier"] == "Bet"], "leans": [c for c in cards if c["tier"] == "Lean"],
+            "passes": [c for c in cards if c["tier"] == "Pass"][:25], "unpriced_top": [c for c in cards if c["tier"] == "No price"][:15],
+            "note": "The model only picks among players with a stored price. Enter prices on the board (they save when signed in) or connect an odds feed."}
+
+class Pick(BaseModel):
+    gsis_id: str; game_id: str; market: str = "anytime_td"; player: str = ""; team: str = ""; opp: str = ""
+    line: Optional[float] = None; book: str = ""; price_taken: int; p_model: float; stake_units: float = 1.0; note: str = ""
+
+import jwt  # PyJWT
+SUPABASE_JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET")
+ADMIN_USER = os.environ.get("ADMIN_USER_ID")   # your Supabase user id -> house record + admin routes
+
+def _user(x_token: str = "", authorization: str = "") -> str:
+    """Returns a user id. Admin token -> 'admin'. Supabase JWT -> its sub. Else 401."""
+    if TOKEN and x_token == TOKEN: return "admin"
+    if SUPABASE_JWT_SECRET and authorization.lower().startswith("bearer "):
+        try:
+            claims = jwt.decode(authorization.split(" ", 1)[1], SUPABASE_JWT_SECRET, algorithms=["HS256"], audience="authenticated")
+            return claims["sub"]
+        except Exception: raise HTTPException(401, "invalid session")
+    raise HTTPException(401, "sign in to save")
+
+def _auth(x_token: str):
+    if not TOKEN or x_token != TOKEN: raise HTTPException(401, "private route")
+
+@app.post("/api/picks")
+def add_pick(p: Pick, x_token: str = Header(default=""), authorization: str = Header(default="")):
+    uid = _user(x_token, authorization)
+    with ENGINE.begin() as c:
+        c.execute(text("""insert into picks(gsis_id, game_id, market, player, team, opp, line, book, price_taken, p_model, stake_units, note, user_id)
+                          values (:gsis_id,:game_id,:market,:player,:team,:opp,:line,:book,:price_taken,:p_model,:stake_units,:note,:uid)"""), {**p.model_dump(), "uid": None if uid == "admin" else uid})
+    return {"ok": True}
+
+@app.get("/api/picks")
+def list_picks(week: Optional[int] = None, x_token: str = Header(default=""), authorization: str = Header(default="")):
+    uid = _user(x_token, authorization)
+    q = "select * from picks where " + ("user_id is null" if uid == "admin" else "user_id = :u") + (" and game_id like :w" if week else "") + " order by placed_at desc"
+    with ENGINE.begin() as c:
+        rows = c.execute(text(q), {"u": uid, "w": f"%_{week:02d}_%"}).mappings().all()
+    return [dict(r) for r in rows]
+
+@app.delete("/api/picks/{pick_id}")
+def del_pick(pick_id: int, x_token: str = Header(default="")):
+    _auth(x_token)
+    with ENGINE.begin() as c: c.execute(text("delete from picks where id=:i"), {"i": pick_id})
+    return {"ok": True}
+
+class Close(BaseModel):
+    closing_price: int
+@app.patch("/api/picks/{pick_id}/close")
+def close_pick(pick_id: int, body: Close, x_token: str = Header(default="")):
+    """Record the closing price (kickoff) so CLV can be computed by grade.py."""
+    _auth(x_token)
+    with ENGINE.begin() as c: c.execute(text("update picks set closing_price=:c where id=:i"), {"c": body.closing_price, "i": pick_id})
+    return {"ok": True}
+
+@app.get("/api/record")
+def record(x_token: str = Header(default="")):
+    _auth(x_token)
+    with ENGINE.begin() as c:
+        rows = c.execute(text("select market, count(*) n, sum(case when result='won' then 1 else 0 end) won, sum(case when result='lost' then 1 else 0 end) lost, "
+                              "sum(coalesce(pnl_units,0)) pnl, avg(clv) clv from picks where result is not null group by market")).mappings().all()
+    return [dict(r) for r in rows]
+
+@app.get("/api/record/public")
+def record_public():
+    """Graded record, no auth: the 'prove it' page."""
+    with ENGINE.begin() as c:
+        rows = c.execute(text("select market, count(*) n, sum(case when result='won' then 1 else 0 end) won, sum(case when result='lost' then 1 else 0 end) lost, "
+                              "round(sum(coalesce(pnl_units,0)),2) pnl, round(avg(clv),4) clv, round(avg(p_model),3) avg_p from picks where result in ('won','lost') group by market")).mappings().all()
+        recent = c.execute(text("select player, team, opp, market, line, price_taken, p_model, closing_price, result, pnl_units, clv, game_id from picks where result is not null order by placed_at desc limit 50")).mappings().all()
+    return {"summary": [dict(r) for r in rows], "recent": [dict(r) for r in recent]}
+
+@app.get("/api/teams/{week}")
+def teams(week: int):
+    f = DATA / f"teams_w{week}.json"
+    if not f.exists(): raise HTTPException(404, f"no team profiles for week {week}")
+    return json.load(open(f))
 
 @app.get("/api/health")
 def health(): return {"ok": True}

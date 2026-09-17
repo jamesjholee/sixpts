@@ -10,9 +10,9 @@ def build_slate(games: pd.DataFrame, season: int, week: int) -> pd.DataFrame:
     g = games[(games.season == season) & (games.week == week)]
     rows = []
     for _, gm in g.iterrows():
-        h = (gm.total_line - gm.spread_line) / 2; a = (gm.total_line + gm.spread_line) / 2
-        rows.append(dict(team=gm.home_team, opp=gm.away_team, implied=h, total=gm.total_line, spread=-gm.spread_line, game_id=gm.game_id, kickoff=str(gm.gameday)))
-        rows.append(dict(team=gm.away_team, opp=gm.home_team, implied=a, total=gm.total_line, spread=gm.spread_line, game_id=gm.game_id, kickoff=str(gm.gameday)))
+        h = (gm.total_line + gm.spread_line) / 2; a = (gm.total_line - gm.spread_line) / 2
+        rows.append(dict(team=gm.home_team, opp=gm.away_team, implied=h, total=gm.total_line, spread=gm.spread_line, game_id=gm.game_id, kickoff=str(gm.gameday)))
+        rows.append(dict(team=gm.away_team, opp=gm.home_team, implied=a, total=gm.total_line, spread=-gm.spread_line, game_id=gm.game_id, kickoff=str(gm.gameday)))
     return pd.DataFrame(rows)
 
 def main():
