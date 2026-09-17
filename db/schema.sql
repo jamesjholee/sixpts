@@ -33,12 +33,12 @@ create table if not exists player_prior (
 );
 
 create table if not exists team_defense (
-  team text references teams, season int, window text, as_of date,
+  team text references teams, season int, stat_window text, as_of date,
   man_rate numeric, zone_rate numeric, one_high numeric, two_high numeric,
   cover0 numeric, cover1 numeric, cover2 numeric, cover2man numeric, cover3 numeric, cover4 numeric, cover6 numeric,
   blitzes int, dropbacks int, rz_td_pct numeric, g2g_td_pct numeric, rz_tgt_allowed int, rz_rush_allowed int,
   pass_td_allowed int, rush_td_allowed int, rz_trips int,
-  source text not null, primary key (team, season, window, source)
+  source text not null, primary key (team, season, stat_window, source)
 );
 
 create table if not exists odds (

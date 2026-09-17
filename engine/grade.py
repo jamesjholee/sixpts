@@ -6,12 +6,18 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from engine import ingest, model as M
 from sqlalchemy import create_engine, text
 
+def _pg(u: str) -> str:
+    """Supabase hands out postgres:// or postgresql:// — pin the psycopg3 driver we install."""
+    if u.startswith("postgres://"): return "postgresql+psycopg://" + u[len("postgres://"):]
+    if u.startswith("postgresql://"): return "postgresql+psycopg://" + u[len("postgresql://"):]
+    return u
+
 def payout(price, won, stake=1.0):
     if not won: return -stake
     return stake * (price / 100 if price > 0 else 100 / -price)
 
 def main(season, week):
-    eng = create_engine(os.environ.get("DATABASE_URL", "sqlite:///data/sixpts.db"))
+    eng = create_engine(_pg(os.environ.get("DATABASE_URL", "sqlite:///data/sixpts.db")))
     p = M.prep_pbp(ingest.load_pbp(season, force=True)); p = p[p.week == week]
     if p.empty: print("no plays yet for that week"); return
     # actuals per player-game

@@ -6,7 +6,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import create_engine, text
 from typing import Optional
-ENGINE = create_engine(os.environ.get("DATABASE_URL", "sqlite:///data/sixpts.db"))
+def _db_url() -> str:
+    u = os.environ.get("DATABASE_URL", "sqlite:///data/sixpts.db")
+    # Supabase/Heroku hand out postgres:// or postgresql:// — pin the psycopg3 driver we actually install
+    if u.startswith("postgres://"): u = "postgresql+psycopg://" + u[len("postgres://"):]
+    elif u.startswith("postgresql://"): u = "postgresql+psycopg://" + u[len("postgresql://"):]
+    return u
+
+ENGINE = create_engine(_db_url(), pool_pre_ping=True)
 
 DATA = pathlib.Path(os.environ.get("SIXPTS_DATA", "data"))
 TOKEN = os.environ.get("SIXPTS_TOKEN")

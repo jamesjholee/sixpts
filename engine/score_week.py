@@ -7,6 +7,12 @@ from engine.features import make_features
 from engine import model as M
 D = pathlib.Path(os.environ.get("SIXPTS_DATA", "data"))
 
+def _pg(u: str) -> str:
+    """Supabase hands out postgres:// or postgresql:// — pin the psycopg3 driver we install."""
+    if u.startswith("postgres://"): return "postgresql+psycopg://" + u[len("postgres://"):]
+    if u.startswith("postgresql://"): return "postgresql+psycopg://" + u[len("postgresql://"):]
+    return u
+
 def american(p): return M.american(np.asarray(p))
 
 def main(season, week):
@@ -124,7 +130,7 @@ def main(season, week):
     out.to_csv(D / f"board_w{week}_gbm.csv", index=False)
     try:
         from sqlalchemy import create_engine, text
-        eng = create_engine(os.environ.get("DATABASE_URL", "sqlite:///data/sixpts.db"))
+        eng = create_engine(_pg(os.environ.get("DATABASE_URL", "sqlite:///data/sixpts.db")))
         sc = out[["gsis_id", "game_id", "p_model", "fair_odds"]].copy(); sc["market"] = "anytime_td"; sc["matchup_source"] = "own"
         for c in ["xtd_pg_shrunk", "c_role", "c_offense", "c_defense", "c_environment", "certainty"]: sc[c] = out[c]
         sc = sc.rename(columns={"c_role": "opp_score", "c_offense": "gravity_score", "c_defense": "matchup_score", "c_environment": "env_score", "certainty": "score"})

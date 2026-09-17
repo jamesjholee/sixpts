@@ -7,12 +7,18 @@ from __future__ import annotations
 import os, json, time, pathlib, requests, pandas as pd
 from sqlalchemy import create_engine, text
 
+def _pg(u: str) -> str:
+    """Supabase hands out postgres:// or postgresql:// — pin the psycopg3 driver we install."""
+    if u.startswith("postgres://"): return "postgresql+psycopg://" + u[len("postgres://"):]
+    if u.startswith("postgresql://"): return "postgresql+psycopg://" + u[len("postgresql://"):]
+    return u
+
 DATA = pathlib.Path(os.environ.get("SIXPTS_DATA", "data")); DATA.mkdir(exist_ok=True)
 NFLVERSE = "https://github.com/nflverse/nflverse-data/releases/download"
 PF = "https://api.propfinder.app"
 
 def db():
-    return create_engine(os.environ.get("DATABASE_URL", "sqlite:///data/sixpts.db"))
+    return create_engine(_pg(os.environ.get("DATABASE_URL", "sqlite:///data/sixpts.db")))
 
 # ---------------- nflverse ----------------
 def nflverse_file(path: str, force: bool = False) -> pathlib.Path:
@@ -55,7 +61,7 @@ def pf_team_defense(year: int = 2025, position: str = "All", last_n: int = 0) ->
     out = []
     for r in rows:
         s = r["stats"]
-        out.append(dict(team=r["code"], season=s["year"], window=f"last{last_n}" if last_n else "season", as_of=s.get("lastUpdated", "")[:10],
+        out.append(dict(team=r["code"], season=s["year"], stat_window=f"last{last_n}" if last_n else "season", as_of=s.get("lastUpdated", "")[:10],
             man_rate=s.get("manCoverageRate"), zone_rate=s.get("zoneCoverageRate"), one_high=s.get("oneHighCoverageRate"), two_high=s.get("twoHighCoverageRate"),
             cover0=s.get("cover0Rate"), cover1=s.get("cover1Rate"), cover2=s.get("cover2Rate"), cover2man=s.get("cover2ManRate"), cover3=s.get("cover3Rate"),
             cover4=s.get("cover4Rate"), cover6=s.get("cover6Rate"), blitzes=s.get("defenseBlitzes"), dropbacks=s.get("dropbacks"),
@@ -70,7 +76,7 @@ def pf_team_defense_from_json(path: str) -> pd.DataFrame:
     if "rows" in raw:  # full endpoint dump
         rows = raw["rows"]; out = []
         for r in rows:
-            s = r["stats"]; out.append(dict(team=r["code"], season=s["year"], window="season", as_of=s.get("lastUpdated", "")[:10],
+            s = r["stats"]; out.append(dict(team=r["code"], season=s["year"], stat_window="season", as_of=s.get("lastUpdated", "")[:10],
                 man_rate=s["manCoverageRate"], zone_rate=s["zoneCoverageRate"], one_high=s["oneHighCoverageRate"], two_high=s["twoHighCoverageRate"],
                 cover0=s["cover0Rate"], cover1=s["cover1Rate"], cover2=s["cover2Rate"], cover2man=s["cover2ManRate"], cover3=s["cover3Rate"], cover4=s["cover4Rate"], cover6=s["cover6Rate"],
                 blitzes=s["defenseBlitzes"], dropbacks=s["dropbacks"], rz_td_pct=s["efficiencyRedzonePct"], g2g_td_pct=s["efficiencyGoaltogoPct"],
@@ -78,7 +84,7 @@ def pf_team_defense_from_json(path: str) -> pd.DataFrame:
                 rz_trips=s["efficiencyRedzoneAttempts"], source="pf"))
         return pd.DataFrame(out)
     # compact hand-transcribed shape {TEAM: {man, zone, ...}}
-    out = [dict(team=k, season=2025, window="season", as_of="", man_rate=v["man"], zone_rate=v["zone"], one_high=v["one_high"], two_high=v["two_high"],
+    out = [dict(team=k, season=2025, stat_window="season", as_of="", man_rate=v["man"], zone_rate=v["zone"], one_high=v["one_high"], two_high=v["two_high"],
                 cover1=v.get("c1"), cover3=v.get("c3"), blitzes=v.get("blitzes"), dropbacks=v.get("dropbacks"), rz_td_pct=v["rz_td_pct"], g2g_td_pct=v["g2g_td_pct"],
                 rz_tgt_allowed=v["rz_tgt_allowed"], rz_rush_allowed=v["rz_rush_allowed"], pass_td_allowed=v["pass_td_allowed"], rush_td_allowed=v["rush_td_allowed"],
                 rz_trips=v["rz_trips"], source="pf") for k, v in raw.items() if not k.startswith("_")]
