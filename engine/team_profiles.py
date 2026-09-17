@@ -49,6 +49,7 @@ def role_shares(p, names):
 
 def main(season, week):
     prev, cur = M.prep_pbp(ingest.load_pbp(season - 1)), M.prep_pbp(ingest.load_pbp(season, force=True)); cur = cur[cur.week < week]
+    no_cur = cur.empty   # week 1: nothing has been played yet this season
     pr, rr = M.fit_xtd(prev)
     for p in (prev, cur):
         p["xtd_play"] = 0.0
@@ -57,8 +58,10 @@ def main(season, week):
         p.loc[r, "xtd_play"] = pd.cut(p.loc[r, "yardline_100"], *M.RUSH_BINS).astype(str).map(rr).fillna(rr.mean()).values
     players = pd.read_parquet(ingest.nflverse_file("players/players.parquet"))
     posmap = players.set_index("gsis_id").position; names = players[["gsis_id", "display_name", "position"]].drop_duplicates("gsis_id")
-    off_prev, off_cur = team_off(prev), team_off(cur); def_prev, def_cur = team_def(prev, posmap), team_def(cur, posmap)
-    roles_prev, roles_cur = role_shares(prev, names), role_shares(cur, names)
+    off_prev, def_prev, roles_prev = team_off(prev), team_def(prev, posmap), role_shares(prev, names)
+    off_cur = off_prev.iloc[0:0] if no_cur else team_off(cur)
+    def_cur = def_prev.iloc[0:0] if no_cur else team_def(cur, posmap)
+    roles_cur = roles_prev.iloc[0:0] if no_cur else role_shares(cur, names)
     games = pd.read_parquet(ingest.nflverse_file("schedules/games.parquet", force=True)); g = games[(games.season == season) & (games.week == week)]
     nxt = {}
     for _, gm in g.iterrows():
@@ -75,7 +78,8 @@ def main(season, week):
             tot = u.groupby(["posteam", "week"])[c].transform("sum")
             u[f"{c}_share"] = np.where(tot >= 2, u[c] / tot.replace(0, np.nan), np.nan)   # no share without a real denominator
         return u
-    ws = week_shares(cur); last_wk = ws.week.max() if not ws.empty else 0
+    ws = week_shares(cur) if not no_cur else pd.DataFrame(columns=["posteam", "week", "gsis_id"])
+    last_wk = int(ws.week.max()) if not ws.empty else 0
     callouts = {tm: [] for tm in set(off_prev.posteam) | set(off_cur.posteam)}
     if last_wk >= 1:
         lastg = ws[ws.week == last_wk]
@@ -90,10 +94,10 @@ def main(season, week):
                 if v - b >= thr: callouts[r.posteam].append(f"{nm} ({r.position}): {lab} {v:.0%} in Week {last_wk}, {basis} {b:.0%} — role rising")
                 if b - v >= thr and b >= 0.4: callouts[r.posteam].append(f"{nm} ({r.position}): {lab} {v:.0%} in Week {last_wk}, {basis} {b:.0%} — role falling")
         # teams with nothing to measure
-        for tm, g in cur.groupby("posteam"):
+        for tm, g in (cur.groupby("posteam") if not no_cur else []):
             if g[g.yardline_100 <= 20].drive.nunique() == 0: callouts[tm].append(f"No red zone trips in Week {last_wk} — role shares can't be read yet")
     # regression: TDs vs expected, season to date (needs >= 1 game; flag only large gaps)
-    for _, r in roles_cur.merge(names[["gsis_id"]], on="gsis_id").iterrows():
+    for _, r in (roles_cur.merge(names[["gsis_id"]], on="gsis_id") if not roles_cur.empty else roles_cur).iterrows():
         if r.xtd >= 0.6 and r.td - r.xtd >= 1.0: callouts[r.posteam].append(f"{r.display_name} ({r.position}): {int(r.td)} TD on {r.xtd:.1f} expected — regression risk")
         if r.xtd >= 0.8 and r.xtd - r.td >= 0.8: callouts[r.posteam].append(f"{r.display_name} ({r.position}): {int(r.td)} TD on {r.xtd:.1f} expected — due")
     # depth chart changes (latest snapshot vs previous snapshot), offense skill positions only
@@ -139,9 +143,12 @@ def main(season, week):
     for tm in teams:
         out[tm] = dict(next=nxt.get(tm), offense=dict(prev=rec(off_prev, "posteam", tm), cur=rec(off_cur, "posteam", tm)),
                        defense=dict(prev=rec(def_prev, "defteam", tm), cur=rec(def_cur, "defteam", tm)),
-                       roles=dict(prev=top_roles(roles_prev, tm), cur=top_roles(roles_cur, tm)), callouts=callouts.get(tm, []))
+                       roles=dict(prev=top_roles(roles_prev, tm), cur=top_roles(roles_cur, tm) if not no_cur else []), callouts=callouts.get(tm, []),
+                       note=(f"No {season} games yet — everything shown is {season - 1}." if no_cur else None))
     json.dump({"season": season, "week": week, "teams": out}, open(D / f"teams_w{week}.json", "w"), default=float)
     # quick console: biggest scheme shifts so far
+    if no_cur:
+        json_path = D / f"teams_w{week}.json"; print(f"wrote {json_path} ({season - 1} baseline only — no {season} games yet)"); return
     m = off_cur.merge(off_prev, on="posteam", suffixes=("_26", "_25"))
     m["rz_pass_shift"] = m.rz_pass_rate_26 - m.rz_pass_rate_25; m["poe_shift"] = m.pass_oe_26 - m.pass_oe_25
     print("Biggest red-zone pass-rate shifts vs 2025 (one week of data — treat as leads, not conclusions):")

@@ -66,11 +66,19 @@ def add_upcoming(pg, off, dfn, season, week, games):
         for team in (gm.home_team, gm.away_team):
             cands = pg[(pg.season == season) & (pg.posteam == team)].gsis_id.unique()
             for pid in cands: rows.append(dict(season=season, week=week, game_id=gm.game_id, posteam=team, gsis_id=pid))
-    up = pd.DataFrame(rows)
+    up = pd.DataFrame(rows).drop_duplicates(["season", "week", "game_id", "posteam", "gsis_id"])
+    # a replayed week already has real rows — keep those, add placeholders only for players without one
+    have = set(map(tuple, pg.loc[(pg.season == season) & (pg.week == week), ["game_id", "gsis_id"]].itertuples(index=False, name=None)))
+    if have: up = up[~up.apply(lambda r: (r.game_id, r.gsis_id) in have, axis=1)]
     pg = pd.concat([pg, up], ignore_index=True)
-    orows = [dict(season=season, week=week, game_id=gm.game_id, posteam=t) for _, gm in g.iterrows() for t in (gm.home_team, gm.away_team)]
-    drows = [dict(season=season, week=week, game_id=gm.game_id, defteam=t) for _, gm in g.iterrows() for t in (gm.home_team, gm.away_team)]
-    return pg, pd.concat([off, pd.DataFrame(orows)], ignore_index=True), pd.concat([dfn, pd.DataFrame(drows)], ignore_index=True)
+    orows = pd.DataFrame([dict(season=season, week=week, game_id=gm.game_id, posteam=t) for _, gm in g.iterrows() for t in (gm.home_team, gm.away_team)])
+    drows = pd.DataFrame([dict(season=season, week=week, game_id=gm.game_id, defteam=t) for _, gm in g.iterrows() for t in (gm.home_team, gm.away_team)])
+    # don't duplicate team rows that already exist (replaying a week that has been played)
+    have_o = set(map(tuple, off.loc[(off.season == season) & (off.week == week), ["game_id", "posteam"]].itertuples(index=False, name=None)))
+    have_d = set(map(tuple, dfn.loc[(dfn.season == season) & (dfn.week == week), ["game_id", "defteam"]].itertuples(index=False, name=None)))
+    if have_o: orows = orows[~orows.apply(lambda r: (r.game_id, r.posteam) in have_o, axis=1)]
+    if have_d: drows = drows[~drows.apply(lambda r: (r.game_id, r.defteam) in have_d, axis=1)]
+    return pg, pd.concat([off, orows], ignore_index=True), pd.concat([dfn, drows], ignore_index=True)
 
 def main(upcoming=None):
     ensure_files()

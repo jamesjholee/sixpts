@@ -171,6 +171,19 @@ def record(x_token: str = Header(default="")):
                               "sum(coalesce(pnl_units,0)) pnl, avg(clv) clv from picks where result is not null group by market")).mappings().all()
     return [dict(r) for r in rows]
 
+@app.get("/api/scorecard/{week}")
+def scorecard(week: int):
+    """How the published board actually did that week. Public."""
+    f = DATA / f"scorecard_w{week}.json"
+    if not f.exists(): raise HTTPException(404, f"no scorecard for week {week}")
+    return json.load(open(f))
+
+@app.get("/api/scorecards")
+def scorecards():
+    import re
+    ws = sorted({int(m.group(1)) for x in DATA.glob("scorecard_w*.json") if (m := re.search(r"scorecard_w(\d+)", x.name))})
+    return {"weeks": ws}
+
 @app.get("/api/record/public")
 def record_public():
     """Graded record, no auth: the 'prove it' page."""

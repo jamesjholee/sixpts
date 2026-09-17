@@ -22,6 +22,7 @@ python3 engine/fit_model.py                              # trains, prints 2025 h
 python3 engine/build_training.py --upcoming 2026 2       # walk-forward rows for the upcoming week
 python3 -m engine.score_week --season 2026 --week 2      # writes data/board_w2.json + board_w2_public.json
 python3 -m engine.team_profiles --season 2026 --week 2   # writes data/teams_w2.json (Games tab)
+python3 -m engine.score_card --season 2026 --week 1      # after a week is played: grades the published board -> Record tab
 python3 engine/backtest.py                               # ablations, weekly table, leakage checks (run after any feature change)
 # (optional) formula model v1 for comparison:
 # python3 -m engine.run_week --season 2026 --week 2 --pf-json data/pf_team_defense_2025.json
@@ -34,6 +35,13 @@ cd web && npm run check            # typecheck + renders the app in jsdom agains
 - nflverse: public, CC-BY. Backbone for everything time-varying.
 - PropFinder: your subscription, personal/non-commercial. Loaded only with `PF_COOKIE`/`PF_BEARER` in env, written with `source='pf'`, never served on a public route. Keep pulls at page-load volume (~10-15/day).
 - Public deploy (sixpts.com) serves `board_w{n}_public.json` — PF-derived matchup notes are stripped; the blended multiplier remains.
+
+## Deploying a new week
+The API serves boards from the repo (Render's free tier has no disk). After the Tuesday run:
+```
+git add -f data/board_w<N>_public.json data/teams_w<N>.json && git commit -m "boards: week <N>" && git push
+```
+Render redeploys automatically. The private board, odds and picks live in the database, not the repo.
 
 ## Deploy
 - API: Render (or Fly) with DATABASE_URL → Supabase Postgres (`db/schema.sql`), SIXPTS_TOKEN, PF_COOKIE (private only).
@@ -62,7 +70,7 @@ Writes per-book rows to `odds` (source='pf'), separates the 1.5 line into `td_2p
 Single-user by default (admin key = `SIXPTS_TOKEN`). To open it up: enable Supabase Auth (magic link), run `db/auth_migration.sql`, set `SUPABASE_JWT_SECRET` + `ADMIN_USER_ID` in `.env` and `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` in `web/.env`. Research stays public; sign-in only unlocks saving picks/prices. The public Record shows the house (admin) picks only.
 
 ## Weekly rhythm
-- Tue: `grade --week <last>` -> `build_training.py --upcoming <wk>` -> `score_week` -> `team_profiles`
+- Tue: `score_card --week <last>` (model vs results) -> `grade --week <last>` (your picks) -> `build_training.py --upcoming <wk>` -> `score_week` -> `team_profiles`
 - Thu/Sat/Sun: `pf_odds` for fresh prices; re-run `score_week` once the week's injury report is in nflverse (board shows a banner until then)
 - Monthly: `build_training.py` (full) -> `fit_model.py` -> `backtest.py`
 

@@ -15,3 +15,6 @@ data/teams_*.json
 data/upcoming_*.parquet
 data/pf_status_*.json
 data/props*.json
+!data/board_w*_public.json
+!data/teams_w*.json
+!data/scorecard_w*.json
