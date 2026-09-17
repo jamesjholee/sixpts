@@ -48,4 +48,5 @@ def make_features(df: pd.DataFrame):
          "trail_pressure", "x_trail_pass", "x_lead_rush", "off_rz_pass_rate_trail", "off_rz_pass_rate_lead",
          "abs_same_grp", "abs_xtd_team", "abs_n", "x_abs_share", "questionable"]  # weather kept as call-out only (backtest: no gain)
 
-    return df, FEATS
+    FEATS_dedup = list(dict.fromkeys(FEATS))  # newer sklearn rejects duplicate column names
+    return df, FEATS_dedup
