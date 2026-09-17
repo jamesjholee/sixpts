@@ -1,3 +1,4 @@
+import { API } from './api'
 import { useEffect, useMemo, useState } from 'react'
 import Teams from './Teams'
 import Record from './Record'
@@ -87,14 +88,14 @@ export default function App() {
   const [colsOpen, setColsOpen] = useState(false)
   const [callouts, setCallouts] = useState<Callouts>({}); const [coOpen, setCoOpen] = useState(false)
   const [mp, setMp] = useState<any>(null); const [picksTick, setPicksTick] = useState(0); const [mpOpen, setMpOpen] = useState<'bets' | 'passes' | null>('bets')
-  useEffect(() => { if (market !== 'td') return; fetch(`/api/model-picks/${week}`).then(r => r.ok ? r.json() : null).then(setMp).catch(() => {}) }, [week, market, picksTick])
-  useEffect(() => { fetch(`/api/teams/${week}`).then(r => r.ok ? r.json() : null).then(d => { if (d) { const c: Callouts = {}; Object.entries(d.teams).forEach(([k, v]: any) => { if (v.callouts?.length) c[k] = v.callouts }); setCallouts(c) } }).catch(() => {}) }, [week])
+  useEffect(() => { if (market !== 'td') return; fetch(`${API}/api/model-picks/${week}`).then(r => r.ok ? r.json() : null).then(setMp).catch(() => {}) }, [week, market, picksTick])
+  useEffect(() => { fetch(`${API}/api/teams/${week}`).then(r => r.ok ? r.json() : null).then(d => { if (d) { const c: Callouts = {}; Object.entries(d.teams).forEach(([k, v]: any) => { if (v.callouts?.length) c[k] = v.callouts }); setCallouts(c) } }).catch(() => {}) }, [week])
   const show = (k: string) => !hidden.has(k)
   const toggleCol = (k: string) => setHidden(h => { const n = new Set(h); n.has(k) ? n.delete(k) : n.add(k); try { localStorage.setItem('sixpts_hidden_cols', JSON.stringify([...n])) } catch {} ; return n })
   const visibleCount = COLS.filter(c => show(c.k)).length
 
   useEffect(() => {
-    const url = token ? `/api/private/board/${week}` : `/api/board/${week}`
+    const url = token ? `${API}/api/private/board/${week}` : `${API}/api/board/${week}`
     fetch(url, { headers: token ? { 'X-Token': token } : {} }).then(r => { if (!r.ok) throw new Error(r.status === 401 ? 'Private token rejected' : `No board for week ${week}`); return r.json() })
       .then(setData).catch(e => setErr(e.message))
   }, [week, token])
@@ -186,7 +187,7 @@ export default function App() {
               {market === 'rec' && <td><input className="odds" type="number" step={0.5} placeholder="4.5" value={(r as any).recLine || ''} onClick={e => e.stopPropagation()} onChange={e => setStore(st => ({ ...st, [id]: { ...st[id], recLine: e.target.value } }))} /></td>}
               <td className="num">{market === 'rec' && !(r as any).recLine ? <span className="meta">enter line</span> : <span className={'p ' + heat(r.p_model)}>{pct(r.p_model)}</span>}</td>
               {show('fair_odds') && <td className="num">{market === 'rec' && !(r as any).recLine ? '—' : fmtOdds(r.fair_odds ?? 0)}</td>}
-              {show('book') && <td><input className="odds" type="number" step={5} placeholder="+150" value={s.odds || ''} onClick={e => e.stopPropagation()} onChange={e => setStore(st => ({ ...st, [id]: { ...st[id], odds: e.target.value } }))} onBlur={e => { const v = Number(e.target.value); if (canSave && v) fetch('/api/odds', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ gsis_id: r.gsis_id, game_id: r.game_id, market: market === 'rec' ? 'receptions' : 'anytime_td', book: 'book', price: v, line: market === 'rec' ? Number((r as any).recLine) || null : null }) }).then(() => setPicksTick(t => t + 1)).catch(() => {}) }} /></td>}
+              {show('book') && <td><input className="odds" type="number" step={5} placeholder="+150" value={s.odds || ''} onClick={e => e.stopPropagation()} onChange={e => setStore(st => ({ ...st, [id]: { ...st[id], odds: e.target.value } }))} onBlur={e => { const v = Number(e.target.value); if (canSave && v) fetch(`${API}/api/odds`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ gsis_id: r.gsis_id, game_id: r.game_id, market: market === 'rec' ? 'receptions' : 'anytime_td', book: 'book', price: v, line: market === 'rec' ? Number((r as any).recLine) || null : null }) }).then(() => setPicksTick(t => t + 1)).catch(() => {}) }} /></td>}
               {show('edge') && <td className="num">{r.edge == null ? <span className="meta">—</span> : <span className={'edge ' + (r.edge >= 0 ? 'pos' : 'neg')}>{r.edge >= .03 ? <span className="flag">{(r.edge * 100).toFixed(1)}</span> : (r.edge * 100).toFixed(1)}</span>}</td>}
               {show('xtd_pg_shrunk') && <td className="num">{n1(r.xtd_pg_shrunk)}</td>}
               {show('rz_tgt_pg') && <td>{n1(r.rz_tgt_pg ?? r.rz_tgt, 1)}</td>}{show('ez_tgt_pg') && <td>{n1(r.ez_tgt_pg ?? r.ez_tgt, 1)}</td>}{show('rz_carry_pg') && <td>{n1(r.rz_carry_pg ?? r.rz_carry, 1)}</td>}{show('i5_carry_pg') && <td>{n1(r.i5_carry_pg ?? r.i5_carry, 1)}</td>}
@@ -197,7 +198,7 @@ export default function App() {
               {show('hit_l5') && <td>{r.n_l5 ? <span className={(r.hit_l5 ?? 0) - (r.xtd_l5 ?? 0) >= 1.5 ? 'edge neg' : ''} title={(r.hit_l5 ?? 0) - (r.xtd_l5 ?? 0) >= 1.5 ? 'Scoring well above expectation — streak, not role' : ''}>{r.hit_l5} of {r.n_l5} <small className="meta">exp {n1(r.xtd_l5, 1)}</small></span> : '—'}</td>}
               {show('flags') && <td className="l" style={{ whiteSpace: 'normal', maxWidth: 260 }}>{(r.flags || []).map(f => <span key={f} className={'flag-chip' + (/QUESTIONABLE|falling|regression risk/.test(f) ? ' warn' : '')}>{f}</span>)}</td>}
               <td><button className={'pick ' + (s.picked ? 'on' : '')} onClick={e => { e.stopPropagation(); const now = !s.picked; setStore(st => ({ ...st, [id]: { ...st[id], picked: now, pickedAt: new Date().toISOString() } }))
-                if (now && canSave && s.odds) fetch('/api/picks', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ gsis_id: r.gsis_id, game_id: r.game_id, market: market === 'rec' ? 'receptions' : 'anytime_td', player: r.player, team: r.team, opp: r.opp, line: market === 'rec' ? Number((r as any).recLine) : null, price_taken: Number(s.odds), p_model: r.p_model }) }).catch(() => {})
+                if (now && canSave && s.odds) fetch(`${API}/api/picks`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ gsis_id: r.gsis_id, game_id: r.game_id, market: market === 'rec' ? 'receptions' : 'anytime_td', player: r.player, team: r.team, opp: r.opp, line: market === 'rec' ? Number((r as any).recLine) : null, price_taken: Number(s.odds), p_model: r.p_model }) }).catch(() => {})
                 else if (now && !s.odds) alert('Enter the book price first so the pick is logged with a price.') }}>{s.picked ? 'Picked' : 'Log pick'}</button></td>
             </tr>
             {open === id && <tr key={id + 'd'} className="detail"><td colSpan={visibleCount}>

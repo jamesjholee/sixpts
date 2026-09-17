@@ -100,8 +100,10 @@ def add_pick(p: Pick, x_token: str = Header(default=""), authorization: str = He
 def list_picks(week: Optional[int] = None, x_token: str = Header(default=""), authorization: str = Header(default="")):
     uid = _user(x_token, authorization)
     q = "select * from picks where " + ("user_id is null" if uid == "admin" else "user_id = :u") + (" and game_id like :w" if week else "") + " order by placed_at desc"
+    params = {"u": uid}
+    if week: params["w"] = f"%_{week:02d}_%"
     with ENGINE.begin() as c:
-        rows = c.execute(text(q), {"u": uid, "w": f"%_{week:02d}_%"}).mappings().all()
+        rows = c.execute(text(q), params).mappings().all()
     return [dict(r) for r in rows]
 
 @app.delete("/api/picks/{pick_id}")

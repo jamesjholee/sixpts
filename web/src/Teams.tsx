@@ -1,3 +1,4 @@
+import { API } from './api'
 import { useEffect, useState } from 'react'
 
 type Off = { games: number; plays: number; pass_rate: number; neutral_pass_rate: number | null; pass_oe: number; rz_trips: number; rz_pass_rate: number | null; rz_td_pct: number | null; td_pg: number; xtd_pg: number }
@@ -19,7 +20,7 @@ function Delta({ cur, prev, fmt, invert = false }: { cur?: number | null; prev?:
 
 export default function Teams({ week, season }: { week: number; season: number }) {
   const [data, setData] = useState<Data | null>(null); const [err, setErr] = useState(''); const [sel, setSel] = useState('')
-  useEffect(() => { fetch(`/api/teams/${week}`).then(r => { if (!r.ok) throw new Error(`No team profiles for week ${week}`); return r.json() }).then(d => { setData(d); setSel(Object.keys(d.teams)[0]) }).catch(e => setErr(e.message)) }, [week])
+  useEffect(() => { fetch(`${API}/api/teams/${week}`).then(r => { if (!r.ok) throw new Error(`No team profiles for week ${week}`); return r.json() }).then(d => { setData(d); setSel(Object.keys(d.teams)[0]) }).catch(e => setErr(e.message)) }, [week])
   if (err) return <p className="empty">{err}</p>
   if (!data) return <p className="empty">Loading team profiles…</p>
   const t = data.teams[sel]; if (!t) return null
