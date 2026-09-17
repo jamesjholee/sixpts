@@ -1,7 +1,17 @@
 .env
-data/*.parquet
-data/*.db
-data/board_w*.json
+web/.env
+.DS_Store
+**/.DS_Store
+__pycache__/
 web/node_modules
 web/dist
-__pycache__/
+# generated data — only data/pf_team_defense_2025.json is tracked
+data/*.parquet
+data/*.db
+data/*.pkl
+data/board_*.json
+data/board_*.csv
+data/teams_*.json
+data/upcoming_*.parquet
+data/pf_status_*.json
+data/props*.json

@@ -1,8 +1,8 @@
 name: weekly-board
 on:
   schedule:
-    - cron: "0 11 * * 2"   # Tuesday 07:00 ET — after MNF data lands
-    - cron: "0 12 * * 4,6,0"  # Thu/Sat/Sun refresh (lines move)
+    - cron: "0 11 * * 2"      # Tuesday 07:00 ET — grade last week, score next week
+    - cron: "0 12 * * 4,6,0"  # Thu/Sat/Sun — rescore with the latest injury report + lines
   workflow_dispatch:
     inputs: { week: { description: "NFL week", required: true } }
 jobs:
@@ -13,13 +13,28 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - run: pip install -r requirements.txt
-      - name: Run engine
+      - name: Restore model + data cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            data/*.parquet
+            data/td_model.pkl
+          key: sixpts-data-${{ github.run_id }}
+          restore-keys: sixpts-data-
+      - name: Score the week
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           PF_COOKIE: ${{ secrets.PF_COOKIE }}
         run: |
           WEEK="${{ github.event.inputs.week }}"
           if [ -z "$WEEK" ]; then WEEK=$(python -c "import datetime as d;print(max(1,(d.date.today()-d.date(2026,9,8)).days//7+1))"); fi
-          python -m engine.run_week --season 2026 --week $WEEK
-      - name: Publish public JSON to Pages branch
-        run: echo "wire to Vercel / Supabase storage — see README"
+          if [ ! -f data/td_model.pkl ]; then python3 engine/build_training.py && python3 engine/fit_model.py; fi
+          if [ "$(date +%u)" = "2" ]; then python3 -m engine.grade --season 2026 --week $((WEEK-1)) || true; fi
+          python3 engine/build_training.py --upcoming 2026 $WEEK
+          python3 -m engine.score_week --season 2026 --week $WEEK
+          python3 -m engine.team_profiles --season 2026 --week $WEEK
+          if [ -n "$PF_COOKIE" ]; then python3 -m engine.pf_odds --week $WEEK --live || true; fi
+      - name: Upload boards
+        uses: actions/upload-artifact@v4
+        with: { name: boards-week-${{ github.run_id }}, path: "data/board_*.json
+data/teams_*.json" }

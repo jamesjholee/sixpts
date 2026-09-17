@@ -45,9 +45,24 @@ cd web && npm i && npm run dev     # http://localhost:5173/?week=2
 3. Tuesday: `python3 -m engine.grade --season 2026 --week N` -> won/lost, units, CLV. `GET /api/record` for the running record.
 Judge on CLV over 60+ picks, not on any single week.
 
+## Model picks
+`GET /api/model-picks/{week}` — the model chooses, with reasons, among players that have a stored price: value (edge vs the book's implied probability, EV per unit, quarter-Kelly stake) AND signal agreement (real scoring role, defense leaks, environment, available, role not falling, not a streak, certainty). Tiers: **Bet** (5+ pts edge, all-but-one signals green, high certainty), **Lean** (edge, mixed signals), **Pass** (says exactly why, e.g. "would need -120 or better"). Nothing shorter than -250 or longer than +600 can be a Bet.
+
+## Odds from PropFinder (private only)
+Save the props page(s) from your logged-in browser to `data/props.json` (one page or a JSON list of pages), or set `PF_COOKIE`/`PF_BEARER` in `.env` and pull live:
+```
+python3 -m engine.pf_odds --week 2 --file data/props.json
+python3 -m engine.pf_odds --week 2 --live                             # paginated, ~4 calls for the TD board
+python3 -m engine.pf_odds --week 2 --live --category receivingReceptions
+```
+Writes per-book rows to `odds` (source='pf'), separates the 1.5 line into `td_2plus`, prints unmatched names (add to `ALIASES` in `engine/pf_odds.py`) and PropFinder's questionable flags. Model picks then use the best price across books. Refresh Thu / Sat / Sun morning. PF-sourced odds never render on a public route.
+
+## Accounts (optional)
+Single-user by default (admin key = `SIXPTS_TOKEN`). To open it up: enable Supabase Auth (magic link), run `db/auth_migration.sql`, set `SUPABASE_JWT_SECRET` + `ADMIN_USER_ID` in `.env` and `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` in `web/.env`. Research stays public; sign-in only unlocks saving picks/prices. The public Record shows the house (admin) picks only.
+
 ## Weekly rhythm
-- Tue: `build_training.py --upcoming <wk>` -> `score_week` -> `team_profiles`
-- Fri/Sat: re-run `score_week` once the week's injury report is in nflverse (board shows a banner until then) and lines have settled
+- Tue: `grade --week <last>` -> `build_training.py --upcoming <wk>` -> `score_week` -> `team_profiles`
+- Thu/Sat/Sun: `pf_odds` for fresh prices; re-run `score_week` once the week's injury report is in nflverse (board shows a banner until then)
 - Monthly: `build_training.py` (full) -> `fit_model.py` -> `backtest.py`
 
 ## Model (v2)
