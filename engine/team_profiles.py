@@ -72,8 +72,9 @@ def main(season, week):
         b = r.groupby(["posteam", "week", "rusher_player_id"]).agg(i5=("yardline_100", lambda s: (s <= 5).sum()), xtd_r=("xtd_play", "sum")).reset_index().rename(columns={"rusher_player_id": "gsis_id"})
         u = a.merge(b, on=["posteam", "week", "gsis_id"], how="outer").fillna(0); u["xtd"] = u.xtd + u.xtd_r
         for c in ["rz_tgt", "i5", "xtd"]:
-            u[f"{c}_share"] = u[c] / u.groupby(["posteam", "week"])[c].transform("sum").replace(0, np.nan)
-        return u.fillna(0)
+            tot = u.groupby(["posteam", "week"])[c].transform("sum")
+            u[f"{c}_share"] = np.where(tot >= 2, u[c] / tot.replace(0, np.nan), np.nan)   # no share without a real denominator
+        return u
     ws = week_shares(cur); last_wk = ws.week.max() if not ws.empty else 0
     callouts = {tm: [] for tm in set(off_prev.posteam) | set(off_cur.posteam)}
     if last_wk >= 1:
@@ -85,8 +86,12 @@ def main(season, week):
             nm = r.display_name or r.gsis_id
             for c, lab, thr in [("i5_share", "goal-line carry share", 0.35), ("rz_tgt_share", "red zone target share", 0.25), ("xtd_share", "expected-TD share", 0.25)]:
                 b = r.get(f"{c}_before"); v = r[c]
-                if pd.notna(b) and v - b >= thr: callouts[r.posteam].append(f"{nm} ({r.position}): {lab} {v:.0%} in Week {last_wk}, {basis} {b:.0%} — role rising")
-                if pd.notna(b) and b - v >= thr and b >= 0.4: callouts[r.posteam].append(f"{nm} ({r.position}): {lab} {v:.0%} in Week {last_wk}, {basis} {b:.0%} — role falling")
+                if pd.isna(b) or pd.isna(v): continue   # team had too few of these events to measure a share
+                if v - b >= thr: callouts[r.posteam].append(f"{nm} ({r.position}): {lab} {v:.0%} in Week {last_wk}, {basis} {b:.0%} — role rising")
+                if b - v >= thr and b >= 0.4: callouts[r.posteam].append(f"{nm} ({r.position}): {lab} {v:.0%} in Week {last_wk}, {basis} {b:.0%} — role falling")
+        # teams with nothing to measure
+        for tm, g in cur.groupby("posteam"):
+            if g[g.yardline_100 <= 20].drive.nunique() == 0: callouts[tm].append(f"No red zone trips in Week {last_wk} — role shares can't be read yet")
     # regression: TDs vs expected, season to date (needs >= 1 game; flag only large gaps)
     for _, r in roles_cur.merge(names[["gsis_id"]], on="gsis_id").iterrows():
         if r.xtd >= 0.6 and r.td - r.xtd >= 1.0: callouts[r.posteam].append(f"{r.display_name} ({r.position}): {int(r.td)} TD on {r.xtd:.1f} expected — regression risk")

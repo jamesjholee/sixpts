@@ -103,3 +103,34 @@ th[title]{cursor:help}
 .sig{display:flex;flex-wrap:wrap;gap:4px;margin:4px 0}
 .sigchip{font-size:11px;padding:1px 6px;border-radius:3px;border:1px solid var(--line);color:var(--muted)}
 .sigchip.ok{border-color:var(--turf);color:var(--turf)} .sigchip.no{border-color:var(--red);color:var(--red)}
+
+/* ---- readability pass ---- */
+.controls.sub{padding:8px 10px;border:1px dashed var(--line);border-radius:8px;background:var(--panel)}
+table.simple{min-width:0}
+table.simple td,table.simple th{padding:10px 10px}
+table.simple td.num{font-size:19px}
+.tablewrap.pin th:first-child,.tablewrap.pin td:first-child{position:sticky;left:0;background:var(--panel);z-index:2;box-shadow:2px 0 0 var(--line)}
+.tablewrap.pin tr.row:hover td:first-child{background:color-mix(in srgb,var(--turf) 6%,var(--panel))}
+.cards{display:flex;flex-direction:column;gap:10px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
+.card.open{border-color:var(--turf)}
+.card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;cursor:pointer}
+.card-num{text-align:right} .card-num .p{font-size:22px;font-weight:700;font-family:"Barlow Condensed",sans-serif;padding:4px 10px}
+.card-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:10px;font-size:14px}
+.card-row .odds{width:80px}
+.card-row .pick{margin-left:auto}
+.card-flags{margin-top:8px}
+.card-detail{margin-top:10px;display:flex;flex-direction:column;gap:8px}
+@media (max-width:720px){
+  .wrap{padding:10px 10px 170px}
+  h1{font-size:30px}
+  header{gap:8px}
+  header .meta{font-size:12px}
+  .slate .chip{padding:5px 8px;font-size:12px} .slate .chip b{font-size:15px}
+  .controls{gap:6px}
+  .controls .seg button{padding:6px 8px;font-size:13px}
+  .best{padding:8px 10px} .best h2{font-size:17px} .best h2 .meta{display:block;margin:2px 0 0}
+  .best-row{font-size:13px}
+  .grid{grid-template-columns:1fr}
+  .tray{max-height:32vh}
+}

@@ -43,7 +43,7 @@ def main(season, week):
     for _, r in up.iterrows():
         f = []
         if r.get("i5_carry_trend", 0) >= 0.75: f.append("goal-line role rising")
-        if r.get("i5_carry_trend", 0) <= -0.75: f.append("goal-line role falling")
+        if r.get("i5_carry_trend", 0) <= -0.75 and (r.get("off_gl_concentration") is not None and pd.notna(r.get("off_gl_concentration"))): f.append("goal-line role falling")
         if r.get("rz_tgt_share_trend", 0) >= 0.12: f.append("RZ target share rising")
         if r.get("rz_tgt_share_trend", 0) <= -0.12: f.append("RZ target share falling")
         if r.get("offense_pct_trend", 0) >= 0.15: f.append("snaps rising")

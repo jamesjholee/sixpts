@@ -86,13 +86,20 @@ export default function App() {
     { k: 'def_rz_td_pct', label: 'Opp red zone TD %' }, { k: 'implied', label: 'Implied total' }, { k: 'c_defense', label: 'Defense effect' }, { k: 'certainty', label: 'Certainty' }, { k: 'range', label: 'Range' }, { k: 'hit_l5', label: 'TD hit rate L5' }, { k: 'flags', label: 'Flags' }, { k: 'pick', label: 'Pick button', locked: true }]
   const [hidden, setHidden] = useState<Set<string>>(() => { try { return new Set(JSON.parse(localStorage.getItem('sixpts_hidden_cols') || '[]')) } catch { return new Set() } })
   const [colsOpen, setColsOpen] = useState(false)
+  const [density, setDensity] = useState<'simple' | 'full'>(() => { try { return (localStorage.getItem('sixpts_density') as any) || 'simple' } catch { return 'simple' } })
+  const setDens = (d: 'simple' | 'full') => { setDensity(d); try { localStorage.setItem('sixpts_density', d) } catch {} }
+  const [moreFilters, setMoreFilters] = useState(false)
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 720)
+  useEffect(() => { const f = () => setIsMobile(window.innerWidth < 720); window.addEventListener('resize', f); return () => window.removeEventListener('resize', f) }, [])
+  const SIMPLE = new Set(['player', 'team', 'p_model', 'book', 'edge', 'certainty', 'flags', 'pick'])
   const [callouts, setCallouts] = useState<Callouts>({}); const [coOpen, setCoOpen] = useState(false)
   const [mp, setMp] = useState<any>(null); const [picksTick, setPicksTick] = useState(0); const [mpOpen, setMpOpen] = useState<'bets' | 'passes' | null>('bets')
   useEffect(() => { if (market !== 'td') return; fetch(`${API}/api/model-picks/${week}`).then(r => r.ok ? r.json() : null).then(setMp).catch(() => {}) }, [week, market, picksTick])
   useEffect(() => { fetch(`${API}/api/teams/${week}`).then(r => r.ok ? r.json() : null).then(d => { if (d) { const c: Callouts = {}; Object.entries(d.teams).forEach(([k, v]: any) => { if (v.callouts?.length) c[k] = v.callouts }); setCallouts(c) } }).catch(() => {}) }, [week])
-  const show = (k: string) => !hidden.has(k)
+  const show = (k: string) => density === 'simple' ? SIMPLE.has(k) : !hidden.has(k)
   const toggleCol = (k: string) => setHidden(h => { const n = new Set(h); n.has(k) ? n.delete(k) : n.add(k); try { localStorage.setItem('sixpts_hidden_cols', JSON.stringify([...n])) } catch {} ; return n })
   const visibleCount = COLS.filter(c => show(c.k)).length
+  const state_active_filters = () => (minp !== 15 ? 1 : 0) + (onlyEdge ? 1 : 0) + (onlyPicks ? 1 : 0) + (q ? 1 : 0)
 
   useEffect(() => {
     const url = token ? `${API}/api/private/board/${week}` : `${API}/api/board/${week}`
@@ -132,7 +139,7 @@ export default function App() {
       {nav}
       <header>
         <h1>SixPts <small>Week {data.week} · {market === 'rec' ? 'receptions' : 'anytime TD'}{data.model ? ' · ' + data.model : ''}</small></h1>
-        <span className="meta">P(TD) = 1 − e<sup>−xTD</sup>. Expected touchdowns from where every touch happens, shrunk toward last season, adjusted for game environment and opponent.</span>
+        <span className="meta">Expected touchdowns from where every touch happens, blended with last season, adjusted for the game and the defense — then priced against the book.</span>
         <span style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
           {supabase ? (session ? <button className="pick" onClick={() => signOut()}>Sign out</button> : <><input type="email" placeholder="email to save picks" value={email} onChange={e => setEmail(e.target.value)} /><button className="pick" onClick={() => { if (email) { signIn(email); alert('Check your email for the sign-in link.') } }}>Sign in</button></>) : null}
           <label className="meta">Admin key <input type="password" value={token} placeholder="optional" onChange={e => { setToken(e.target.value); try { localStorage.setItem('sixpts_token', e.target.value) } catch {} }} /></label>
@@ -162,20 +169,48 @@ export default function App() {
       <div className="controls">
         <div className="seg"><button className={market === 'td' ? 'on' : ''} onClick={() => setMarket('td')}>Anytime TD</button><button className={market === 'rec' ? 'on' : ''} onClick={() => setMarket('rec')}>Receptions</button></div>
         <div className="seg">{['', 'RB', 'WR', 'TE', 'QB'].map(p => <button key={p} className={pos === p ? 'on' : ''} onClick={() => setPos(p)}>{p || 'All'}</button>)}</div>
+        <div className="seg" title="Simple shows the columns that decide a bet. Full shows everything and lets you pick columns."><button className={density === 'simple' ? 'on' : ''} onClick={() => setDens('simple')}>Simple</button><button className={density === 'full' ? 'on' : ''} onClick={() => setDens('full')}>Full</button></div>
+        <button className="pick" onClick={() => setMoreFilters(o => !o)}>{moreFilters ? 'Fewer filters' : 'More filters'}{(state_active_filters() ? ` (${state_active_filters()})` : '')}</button>
+        <span className="meta" style={{ marginLeft: 'auto' }}>{rows.length} players</span>
+      </div>
+      {moreFilters && <div className="controls sub">
         <label>Min P(TD) <input type="number" value={minp} min={0} max={100} step={5} onChange={e => setMinp(Number(e.target.value) || 0)} />%</label>
         <label><input type="checkbox" checked={onlyEdge} onChange={e => setOnlyEdge(e.target.checked)} /> only edge ≥ 3 pts</label>
         <label><input type="checkbox" checked={onlyPicks} onChange={e => setOnlyPicks(e.target.checked)} /> only my picks</label>
         <input type="search" placeholder="Search player or team" value={q} onChange={e => setQ(e.target.value)} />
-        <span className="meta">{rows.length} players</span>
-        <div style={{ position: 'relative', marginLeft: 'auto' }}>
+        {density === 'full' && <div style={{ position: 'relative' }}>
           <button className="pick" onClick={() => setColsOpen(o => !o)}>Columns{hidden.size ? ` (${hidden.size} hidden)` : ''}</button>
           {colsOpen && <div className="colmenu">
-            {COLS.map(c => <label key={c.k} className={c.locked ? 'meta' : ''}><input type="checkbox" checked={show(c.k)} disabled={c.locked} onChange={() => toggleCol(c.k)} /> {c.label}</label>)}
+            {COLS.map(c => <label key={c.k} className={c.locked ? 'meta' : ''}><input type="checkbox" checked={!hidden.has(c.k)} disabled={c.locked} onChange={() => toggleCol(c.k)} /> {c.label}</label>)}
             <button onClick={() => { setHidden(new Set()); try { localStorage.removeItem('sixpts_hidden_cols') } catch {} }}>Show all</button>
           </div>}
-        </div>
-      </div>
-      <div className="tablewrap"><table>
+        </div>}
+      </div>}
+      {isMobile ? <div className="cards">
+        {rows.length === 0 && <div className="empty">No players match. Lower the minimum P(TD) or clear a filter.</div>}
+        {rows.map(r => { const id = rid(r); const s = store[id] || {}; return (
+          <div key={id} className={'card' + (open === id ? ' open' : '')}>
+            <div className="card-head" onClick={() => setOpen(open === id ? null : id)}>
+              <div><div className="player" style={{ fontSize: 17 }}>{r.player}</div><div className="meta">{r.position} · {r.team} {r.spread > 0 ? '+' : ''}{r.spread} vs {r.opp}{r.new_team ? ' · new team' : ''}</div></div>
+              <div className="card-num"><span className={'p ' + heat(r.p_model)}>{pct(r.p_model)}</span><div className="meta">fair {fmtOdds(r.fair_odds ?? 0)}</div></div>
+            </div>
+            <div className="card-row">
+              <label className="meta">Book <input className="odds" type="number" step={5} placeholder="+150" value={s.odds || ''} onChange={e => setStore(st => ({ ...st, [id]: { ...st[id], odds: e.target.value } }))} /></label>
+              <span className="meta">Edge {r.edge == null ? '—' : <b className={'edge ' + (r.edge >= 0 ? 'pos' : 'neg')}>{r.edge >= .03 ? <span className="flag">{(r.edge * 100).toFixed(1)}</span> : (r.edge * 100).toFixed(1)}</b>}</span>
+              <span className={'cert ' + (r.certainty_label || '')}>{r.certainty_label ?? '—'}</span>
+              <button className={'pick ' + (s.picked ? 'on' : '')} onClick={() => { const now = !s.picked; setStore(st => ({ ...st, [id]: { ...st[id], picked: now, pickedAt: new Date().toISOString() } }))
+                if (now && canSave && s.odds) fetch(`${API}/api/picks`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ gsis_id: r.gsis_id, game_id: r.game_id, market: market === 'rec' ? 'receptions' : 'anytime_td', player: r.player, team: r.team, opp: r.opp, line: null, price_taken: Number(s.odds), p_model: r.p_model }) }).catch(() => {})
+                else if (now && !s.odds) alert('Enter the book price first so the pick is logged with a price.') }}>{s.picked ? 'Picked' : 'Log pick'}</button>
+            </div>
+            {(r.flags || []).length > 0 && <div className="card-flags">{(r.flags || []).slice(0, open === id ? 99 : 2).map(f => <span key={f} className={'flag-chip' + (/QUESTIONABLE|falling|regression risk/.test(f) ? ' warn' : '')}>{f}</span>)}{open !== id && (r.flags || []).length > 2 && <span className="meta">+{(r.flags || []).length - 2}</span>}</div>}
+            {open === id && <div className="card-detail">
+              {r.verdict && <div className="verdict">{r.verdict}</div>}
+              <div className="block"><h3>His role <b className={'edge ' + ((r.c_role ?? 0) >= 0 ? 'pos' : 'neg')}>{pts(r.c_role)}</b></h3><Stat k="xtd_pg_shrunk" v={n1(r.xtd_pg_shrunk)} /><Stat k="rz_tgt_pg" v={n1(r.rz_tgt_pg, 1)} /><Stat k="rz_carry_pg" v={n1(r.rz_carry_pg, 1)} /><Stat k="i5_carry_pg" v={n1(r.i5_carry_pg, 1)} /><Stat label="Snap share" v={r.snap_pct == null ? '—' : Math.round(r.snap_pct * 100) + '%'} /><Stat label="TD hit rate, last 5" v={r.n_l5 ? `${r.hit_l5} of ${r.n_l5} (exp ${n1(r.xtd_l5, 1)})` : '—'} /></div>
+              <div className="block"><h3>The defense · {r.opp} <b className={'edge ' + ((r.c_defense ?? 0) >= 0 ? 'pos' : 'neg')}>{pts(r.c_defense)}</b></h3><Stat k="def_rz_td_pct" v={r.def_rz_td_pct == null ? '—' : Math.round(r.def_rz_td_pct * 100) + '%'} /><Stat label="TDs/game to RB · WR · TE" v={`${n1(r.def_td_rb_pg)} · ${n1(r.def_td_wr_pg)} · ${n1(r.def_td_te_pg)}`} /></div>
+              <div className="block"><h3>The game <b className={'edge ' + ((r.c_environment ?? 0) >= 0 ? 'pos' : 'neg')}>{pts(r.c_environment)}</b></h3><Stat k="implied" v={r.implied.toFixed(1) + ' pts'} /><Stat label="Over / under" v={String(r.total)} /><Stat label="Red zone pass rate when trailing / leading" v={`${r.off_rz_pass_rate_trailing == null ? '—' : Math.round(r.off_rz_pass_rate_trailing * 100) + '%'} / ${r.off_rz_pass_rate_leading == null ? '—' : Math.round(r.off_rz_pass_rate_leading * 100) + '%'}`} /></div>
+            </div>}
+          </div>) })}
+      </div> :       <div className={'tablewrap' + (density === 'full' ? ' pin' : '')}><table className={density}>
         <thead><tr>{th('player', 'Player', true)}{show('team') && th('team', 'Game', true)}{market === 'rec' && <th title="Projected targets and receptions from his shrunk target rate, catch rate by position, and the implied total">Proj tgt / rec</th>}{market === 'rec' && <th title="Enter the book's receptions line (e.g. 4.5)">Line</th>}{th('p_model', market === 'rec' ? 'P(over)' : 'P(TD)')}{show('fair_odds') && th('fair_odds', 'Fair')}{show('book') && <th title={DEF.book[1]}>{DEF.book[0]}</th>}{show('edge') && th('edge', 'Edge')}{show('xtd_pg_shrunk') && th('xtd_pg_shrunk', 'xTD/g')}{show('rz_tgt_pg') && th('rz_tgt_pg', 'RZ tgt/g')}{show('ez_tgt_pg') && th('ez_tgt_pg', 'EZ/g')}{show('rz_carry_pg') && th('rz_carry_pg', 'RZ car/g')}{show('i5_carry_pg') && th('i5_carry_pg', '≤5/g')}{show('def_rz_td_pct') && th('def_rz_td_pct', 'Opp RZ TD%')}{show('implied') && th('implied', 'Impl')}{show('c_defense') && th('c_defense', 'Def Δ')}{show('certainty') && th('certainty', 'Certainty')}{show('range') && <th title={DEF.range[1]}>{DEF.range[0]}</th>}{show('hit_l5') && <th title={DEF.hit_l5[1]}>{DEF.hit_l5[0]}</th>}{show('flags') && <th className="l" title={DEF.flags[1]}>{DEF.flags[0]}</th>}<th /></tr></thead>
         <tbody>
           {rows.length === 0 && <tr><td colSpan={visibleCount} className="empty">No players match. Lower the minimum P(TD) or clear a filter.</td></tr>}
@@ -196,7 +231,7 @@ export default function App() {
               {show('certainty') && <td><span className={'cert ' + (r.certainty_label || '')}>{r.certainty_label ?? '—'}</span></td>}
               {show('range') && <td className="meta">{r.p_low == null ? '—' : (Math.abs((r.p_high ?? 0) - (r.p_low ?? 0)) < 0.005 ? pct(r.p_model) : pct(r.p_low ?? 0) + '–' + pct(r.p_high ?? 0))}</td>}
               {show('hit_l5') && <td>{r.n_l5 ? <span className={(r.hit_l5 ?? 0) - (r.xtd_l5 ?? 0) >= 1.5 ? 'edge neg' : ''} title={(r.hit_l5 ?? 0) - (r.xtd_l5 ?? 0) >= 1.5 ? 'Scoring well above expectation — streak, not role' : ''}>{r.hit_l5} of {r.n_l5} <small className="meta">exp {n1(r.xtd_l5, 1)}</small></span> : '—'}</td>}
-              {show('flags') && <td className="l" style={{ whiteSpace: 'normal', maxWidth: 260 }}>{(r.flags || []).map(f => <span key={f} className={'flag-chip' + (/QUESTIONABLE|falling|regression risk/.test(f) ? ' warn' : '')}>{f}</span>)}</td>}
+              {show('flags') && <td className="l" style={{ whiteSpace: 'normal', maxWidth: density === 'simple' ? 220 : 260 }}>{(r.flags || []).slice(0, density === 'simple' && open !== id ? 1 : 99).map(f => <span key={f} className={'flag-chip' + (/QUESTIONABLE|falling|regression risk/.test(f) ? ' warn' : '')}>{f}</span>)}{density === 'simple' && open !== id && (r.flags || []).length > 1 && <span className="meta">+{(r.flags || []).length - 1}</span>}</td>}
               <td><button className={'pick ' + (s.picked ? 'on' : '')} onClick={e => { e.stopPropagation(); const now = !s.picked; setStore(st => ({ ...st, [id]: { ...st[id], picked: now, pickedAt: new Date().toISOString() } }))
                 if (now && canSave && s.odds) fetch(`${API}/api/picks`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ gsis_id: r.gsis_id, game_id: r.game_id, market: market === 'rec' ? 'receptions' : 'anytime_td', player: r.player, team: r.team, opp: r.opp, line: market === 'rec' ? Number((r as any).recLine) : null, price_taken: Number(s.odds), p_model: r.p_model }) }).catch(() => {})
                 else if (now && !s.odds) alert('Enter the book price first so the pick is logged with a price.') }}>{s.picked ? 'Picked' : 'Log pick'}</button></td>
@@ -217,7 +252,7 @@ export default function App() {
                   <Stat k="implied" v={r.implied.toFixed(1) + ' pts'} /><Stat label="Over / under" v={String(r.total)} /><Stat label="Spread" v={r.spread > 0 ? 'favored by ' + r.spread : 'underdog by ' + (-r.spread)} /></div>
               </div></td></tr>}
           </>) })}
-        </tbody></table></div>
+        </tbody></table></div>}
       {data.sources && <div className="sources"><b>Where this comes from:</b> {Object.entries(data.sources).map(([k, v]) => <span key={k}>{v}</span>)}<span>Verify a player is active before kickoff — the report can change after it's loaded.</span></div>}
       <div className="tray">
         <h2>Picks <span className="meta">{picks.length ? picks.length + ' logged' : 'none yet'}</span></h2>
