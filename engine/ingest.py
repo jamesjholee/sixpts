@@ -104,7 +104,13 @@ def pf_props(category: str = "touchdowns", books=("draftkings", "fanduel", "betm
 
 # ---------------- write ----------------
 def write(df: pd.DataFrame, table: str, replace_where: str | None = None):
+    """Append rows. Fails loudly if the table is missing — pandas would otherwise invent a
+    wrong-shaped one and every later read would break."""
     eng = db()
+    from sqlalchemy import inspect
+    if not inspect(eng).has_table(table):
+        raise SystemExit(f"table '{table}' does not exist in {eng.url.render_as_string(hide_password=True)} — "
+                         f"apply db/schema.sql (or run db/init_local.py) first")
     with eng.begin() as c:
         if replace_where: c.execute(text(f"delete from {table} where {replace_where}"))
         df.to_sql(table, c, if_exists="append", index=False)

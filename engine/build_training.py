@@ -14,6 +14,7 @@ def ensure_files():
         ingest.nflverse_file(f"pbp/play_by_play_{s}.parquet", force=(s == max(SEASONS)))
         ingest.nflverse_file(f"snap_counts/snap_counts_{s}.parquet", force=(s == max(SEASONS)))
         ingest.nflverse_file(f"injuries/injuries_{s}.parquet", force=(s == max(SEASONS)))
+    ingest.nflverse_file("draft_picks/draft_picks.parquet")
     ingest.nflverse_file("players/players.parquet"); ingest.nflverse_file("schedules/games.parquet", force=True)
 SEASONS = [2021, 2022, 2023, 2024, 2025, 2026]
 POS_OK = ["RB", "WR", "TE", "QB"]
@@ -114,7 +115,8 @@ def main(upcoming=None):
 
     # position from rosters (players.parquet has position)
     players = pd.read_parquet(f"{D}/players.parquet")[["gsis_id", "position"]].dropna().drop_duplicates("gsis_id")
-    pg = pg.merge(players, on="gsis_id", how="left"); pg = pg[pg.position.isin(POS_OK)].copy()
+    draft = pd.read_parquet(f"{D}/draft_picks.parquet")[["gsis_id", "round", "pick"]].dropna(subset=["gsis_id"]).drop_duplicates("gsis_id").rename(columns={"round": "draft_round", "pick": "draft_pick"})
+    pg = pg.merge(players, on="gsis_id", how="left").merge(draft, on="gsis_id", how="left"); pg = pg[pg.position.isin(POS_OK)].copy()
 
     # snap %
     snaps = pd.concat([pd.read_parquet(f"{D}/snap_counts_{s}.parquet") for s in SEASONS])[["game_id", "pfr_player_id", "player", "team", "offense_pct"]]

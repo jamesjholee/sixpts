@@ -7,6 +7,8 @@ from __future__ import annotations
 import numpy as np
 
 MIN_EDGE = {"Bet": 0.05, "Lean": 0.03}
+MARKET_RATIO_MAX = 2.2      # if our number is >2.2x the book's, that's our error, not their mispricing
+MIN_TOUCHES = 6             # below this, a per-game rate is noise (2021-25: corr with scoring is ~0.02)
 POS_ROLE_FLOOR = {"RB": 0.45, "WR": 0.30, "TE": 0.22, "QB": 0.25}   # xTD/game that counts as a "real role"
 
 def implied(price: float) -> float:
@@ -71,8 +73,21 @@ def evaluate(r: dict, price: float | None, book: str = "") -> dict:
     b = dec - 1; kelly = max(0.0, (p * b - (1 - p)) / b); stake = round(0.25 * kelly, 3)   # quarter Kelly
     out.update(edge=round(edge, 3), ev=round(ev, 3), stake=stake, implied_book=round(ip, 3))
 
+    # --- sanity vs the market ---
+    # Four sportsbooks pricing a player at 6% when we say 24% means our sample is thin, not that
+    # we found 18 points of edge. Measured on 2026 week 2: every such "edge" was a one-touch artefact.
+    ratio = p / ip if ip > 0 else 99
+    touches = float(r.get("touches_recent") or ((r.get("rz_tgt_pg") or 0) + (r.get("rz_carry_pg") or 0)) * max(1, r.get("games") or 1) * 4)
+    thin = (r.get("certainty_label") == "low") or touches < MIN_TOUCHES
+    model_far_above = ratio >= MARKET_RATIO_MAX
+    sig["market_agrees"] = not (model_far_above and thin)
+    if not sig["market_agrees"]:
+        against.append(f"we say {p:.0%}, the market says {ip:.0%} on thin usage — that gap is our uncertainty, not an edge")
+    greens = sum(sig.values()); n = len(sig)
+    out.update(signals=sig, greens=greens, n_signals=n, reasons_against=against[:4], market_ratio=round(float(ratio), 2))
+
     # --- decision ---
-    hard_no = (not sig["availability"]) or falling or (not sig["role"])
+    hard_no = (not sig["availability"]) or falling or (not sig["role"]) or (not sig["market_agrees"])
     if hard_no: tier = "Pass"
     elif edge >= MIN_EDGE["Bet"] and greens >= n - 1 and cert == "high": tier = "Bet"
     elif edge >= MIN_EDGE["Bet"] and greens >= n - 2: tier = "Lean"
@@ -84,6 +99,7 @@ def evaluate(r: dict, price: float | None, book: str = "") -> dict:
     if tier == "Bet": head = f"Bet {price:+d} ({book}). Model {p:.0%} vs book {ip:.0%}: +{edge*100:.1f} pts edge, {greens}/{n} signals green."
     elif tier == "Lean": head = f"Lean {price:+d} ({book}). +{edge*100:.1f} pts edge but " + ("only " if greens < n - 1 else "") + f"{greens}/{n} signals green" + (", certainty not high" if cert != "high" else "") + "."
     elif edge < MIN_EDGE["Lean"]: head = f"Pass at {price:+d}. Model {p:.0%} vs book {ip:.0%}: no edge — would need {int(r['fair_odds']):+d} or better."
+    elif not sig["market_agrees"]: head = f"Pass at {price:+d}. We say {p:.0%}, four books say {ip:.0%} — on this little usage the market is the better estimate."
     else: head = f"Pass at {price:+d} despite +{edge*100:.1f} pts edge: " + (against[0] if against else "signals disagree") + "."
     out.update(tier=tier, headline=head)
     return out

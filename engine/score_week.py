@@ -90,6 +90,7 @@ def main(season, week):
         if r.get("abs_same_grp", 0) > 0.1: why.append(f"{r.abs_same_grp:.0%} of the position's red zone work opened by injuries")
         fair = int(round(float(M.american(np.array([r.p_model]))[0]))); lead = f"{'Bet' if r.p_model >= 0.3 else 'Only'} at {fair:+d} or better" if r.p_model >= 0.15 else f"Longshot — fair {fair:+d}"
         verdicts.append(lead + (" — " + ", ".join(why[:3]) if why else ""))
+    up["touches_to_date"] = ((up.targets_std.fillna(0) + up.carries_std.fillna(0)) * up.g_std).round(1)
     up["verdict"] = verdicts
     names = pd.read_parquet(D / "players.parquet")[["gsis_id", "display_name"]].drop_duplicates("gsis_id")
     up = up.merge(names, on="gsis_id", how="left")
@@ -104,7 +105,7 @@ def main(season, week):
             "xtd_l2": "xtd_recent", "i5_carry_l2": "i5_carry_recent", "rz_tgt_share_shr": "rz_tgt_share", "rz_car_share_shr": "rz_carry_share", "abs_same_grp": "rz_share_open",
             "off_rz_pass_rate_trail": "off_rz_pass_rate_trailing", "off_rz_pass_rate_lead": "off_rz_pass_rate_leading",
             "exp_targets": "exp_targets", "exp_rec": "exp_rec", "rec_sd": "rec_sd", "indoor": "indoor", "wind": "wind", "temp": "temp",
-            "hit_l5": "hit_l5", "n_l5": "n_l5", "xtd_l5": "xtd_l5", "verdict": "verdict"}
+            "hit_l5": "hit_l5", "n_l5": "n_l5", "xtd_l5": "xtd_l5", "verdict": "verdict", "touches_to_date": "touches_recent"}
     out = up[list(keep)].rename(columns=keep).sort_values("p_model", ascending=False).round(3)
     out["new_team"] = out.new_team.astype(bool)
     out = out.astype(object).where(pd.notna(out), None)

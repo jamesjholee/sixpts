@@ -2,14 +2,51 @@
 import pandas as pd, numpy as np
 K = 4.0
 
+# ---- priors, measured on 2021-2025 (see docs/model-notes.md) ----
+POS_PRIOR = {"RB": .45, "WR": .32, "TE": .22, "QB": .30}                      # last resort
+SNAP_PRIOR = {  # expected TDs per game by position x snap share — snaps stabilise after one game
+    ("QB", 0): .110, ("QB", 1): .101, ("QB", 2): .177, ("QB", 3): .175,
+    ("RB", 0): .156, ("RB", 1): .311, ("RB", 2): .531, ("RB", 3): .681,
+    ("TE", 0): .099, ("TE", 1): .118, ("TE", 2): .193, ("TE", 3): .280,
+    ("WR", 0): .099, ("WR", 1): .156, ("WR", 2): .244, ("WR", 3): .385}
+DRAFT_PRIOR = {  # cold start: no snaps yet (week 1 rookies). round bucket 1 / 2-3 / 4-7 / undrafted
+    ("RB", 1): .518, ("RB", 2): .412, ("RB", 4): .220, ("RB", 9): .202,
+    ("WR", 1): .365, ("WR", 2): .256, ("WR", 4): .196, ("WR", 9): .163,
+    ("TE", 1): .235, ("TE", 2): .219, ("TE", 4): .149, ("TE", 9): .133,
+    ("QB", 1): .176, ("QB", 2): .151, ("QB", 4): .127, ("QB", 9): .153}
+K_OPP = 25.0        # shrinkage half-weight in touches: a 25-touch sample counts equally with the prior
+
+def _snap_bucket(x):
+    return np.where(x < .25, 0, np.where(x < .5, 1, np.where(x < .75, 2, 3)))
+
+def _round_bucket(r):
+    return np.where(r.isna(), 9, np.where(r <= 1, 1, np.where(r <= 3, 2, 4)))
+
+def role_prior(df: pd.DataFrame) -> pd.Series:
+    """What we expect before this season's touches count for anything.
+    Snap share first (it stabilises after one game), draft capital for players with no snaps yet,
+    position average only as a floor."""
+    pos = df.position.fillna("WR")
+    snap = df.offense_pct_std.fillna(df.offense_pct_prev) if "offense_pct_prev" in df else df.offense_pct_std
+    sb = pd.Series(_snap_bucket(snap.fillna(-1)), index=df.index).where(snap.notna())
+    out = pd.Series([SNAP_PRIOR.get((p, b)) if pd.notna(b) else None for p, b in zip(pos, sb)], index=df.index, dtype=float)
+    rb = pd.Series(_round_bucket(df.draft_round if "draft_round" in df else pd.Series(np.nan, index=df.index)), index=df.index)
+    draft = pd.Series([DRAFT_PRIOR.get((p, int(b))) for p, b in zip(pos, rb)], index=df.index, dtype=float)
+    return out.fillna(draft).fillna(pos.map(POS_PRIOR)).fillna(.25)
+
 def make_features(df: pd.DataFrame):
     df = df.copy()
     # ----- feature engineering: shrunk role rates (same idea as v1, but the model learns the weights) -----
     n = df.g_std.clip(lower=0)
+    # opportunity, not games: one lucky target should not look like a role
+    opp = ((df.targets_std.fillna(0) + df.carries_std.fillna(0)) * n).clip(lower=0)
+    w = opp / (opp + K_OPP)
+    base_prior = role_prior(df)
     def shrunk(cur, prev, fallback):
+        """Blend this season's rate toward the prior, weighted by how many touches it rests on."""
         prev = prev.fillna(fallback); cur = cur.fillna(prev)
-        return (n * cur + K * prev) / (n + K)
-    pos_fb = df.position.map({"RB": .45, "WR": .32, "TE": .22, "QB": .30})
+        return w * cur + (1 - w) * prev
+    pos_fb = base_prior          # snap-conditioned / draft-capital prior, not a flat position average
     for c, fb in [("xtd", pos_fb), ("x_rec_td", pos_fb * .7), ("x_rush_td", pos_fb * .3), ("rz_tgt", 0.8), ("rz_carry", 0.8), ("i5_carry", 0.2), ("ez_tgt", 0.3),
                   ("tgt_share", 0.1), ("car_share", 0.1), ("rz_tgt_share", 0.1), ("rz_car_share", 0.1), ("xtd_share", 0.12), ("offense_pct", 0.5), ("td", pos_fb), ("targets", 3), ("carries", 3)]:
         df[f"{c}_shr"] = shrunk(df[f"{c}_std"], df[f"{c}_prev"], fb)
