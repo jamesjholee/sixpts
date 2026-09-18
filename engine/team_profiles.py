@@ -3,6 +3,7 @@ python -m engine.team_profiles --season 2026 --week 2   -> data/teams_w2.json
 """
 import argparse, json, os, pathlib, sys, numpy as np, pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from engine import env  # noqa: F401  (loads .env)
 from engine import model as M, ingest
 D = pathlib.Path(os.environ.get("SIXPTS_DATA", "data"))
 

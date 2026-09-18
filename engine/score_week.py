@@ -3,6 +3,7 @@ python -m engine.score_week --season 2026 --week 2
 """
 import argparse, json, os, pathlib, pickle, sys, numpy as np, pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from engine import env  # noqa: F401  (loads .env)
 from engine.features import make_features
 from engine import model as M
 D = pathlib.Path(os.environ.get("SIXPTS_DATA", "data"))

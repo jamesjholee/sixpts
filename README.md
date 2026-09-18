@@ -64,7 +64,7 @@ python3 -m engine.odds_api --week 3 --market receptions
 python3 -m engine.odds_api --usage                   # credits remaining
 python3 -m engine.odds_api --week 2 --replay data/oddsapi_sample.json --dry-run
 ```
-Set `ODDS_API_KEY` in `.env`. One credit per event × market × region, so a full slate is ~16 credits;
+Set `ODDS_API_KEY` in `.env` (engine scripts load `.env` automatically; shell variables override it). One credit per event × market × region, so a full slate is ~16 credits;
 the free 500/month covers a couple of refreshes a week. Rows land in `odds` with `source='oddsapi'`,
 which is licensed for display — the public board and the public picks engine use them.
 Refresh Thu / Sat / Sun morning.

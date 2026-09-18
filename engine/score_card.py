@@ -8,6 +8,7 @@ which only covers bets that were actually logged at a price.
 """
 import argparse, json, os, pathlib, sys, numpy as np, pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from engine import env  # noqa: F401  (loads .env)
 from engine import ingest, model as M
 D = pathlib.Path(os.environ.get("SIXPTS_DATA", "data"))
 

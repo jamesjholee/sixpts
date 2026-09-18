@@ -3,6 +3,7 @@ Output: data/train.parquet  (one row per player-game, label = scored a rush/rec 
 """
 import pandas as pd, numpy as np, sys, os, pathlib
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from engine import env  # noqa: F401  (loads .env)
 from engine import model as M
 from engine import ingest
 

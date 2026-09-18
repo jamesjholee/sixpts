@@ -3,6 +3,7 @@ Marks won/lost, P&L in units at the price taken, and CLV vs closing price if you
 """
 import argparse, os, sys, numpy as np, pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from engine import env  # noqa: F401  (loads .env)
 from engine import ingest, model as M
 from sqlalchemy import create_engine, text
 

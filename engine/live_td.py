@@ -18,6 +18,7 @@ Every touchdown is also appended to data/live_td_w{week}.json, which the site re
 from __future__ import annotations
 import argparse, json, os, pathlib, platform, re, subprocess, sys, time, requests
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from engine import env  # noqa: F401  (loads .env)
 D = pathlib.Path(os.environ.get("SIXPTS_DATA", "data"))
 SB = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
 SUM = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event={}"

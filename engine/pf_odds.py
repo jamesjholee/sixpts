@@ -11,6 +11,7 @@ Unmatched names are printed so you can add an alias to ALIASES.
 from __future__ import annotations
 import argparse, json, os, re, sys, unicodedata, pathlib, requests, pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from engine import env  # noqa: F401  (loads .env)
 from engine import ingest
 D = pathlib.Path(os.environ.get("SIXPTS_DATA", "data"))
 

@@ -4,7 +4,9 @@ nflverse (public, CC-BY):  play-by-play, schedules (+Vegas lines), snap counts, 
 PropFinder (private, needs your session): team-defense, td-matchups, coverage, alignment, props (odds)
 """
 from __future__ import annotations
-import os, json, time, pathlib, requests, pandas as pd
+import os, sys, json, time, pathlib, requests, pandas as pd
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+from engine import env  # noqa: F401  (loads .env)
 from sqlalchemy import create_engine, text
 
 def _pg(u: str) -> str:

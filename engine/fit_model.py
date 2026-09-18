@@ -13,6 +13,7 @@ df = pd.read_parquet(f"{D}/train.parquet")
 df = df[df.season >= 2021].copy()
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from engine import env  # noqa: F401  (loads .env)
 from engine.features import make_features, K
 df, FEATS = make_features(df)
 train = df[df.season <= 2024]; test = df[df.season == 2025]

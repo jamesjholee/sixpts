@@ -14,6 +14,7 @@ for display, so the public board and the public picks engine can use them.
 from __future__ import annotations
 import argparse, json, os, pathlib, re, sys, time, unicodedata, requests, pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from engine import env  # noqa: F401  (loads .env)
 from engine import ingest
 D = pathlib.Path(os.environ.get("SIXPTS_DATA", "data"))
 BASE = "https://api.the-odds-api.com/v4/sports/americanfootball_nfl"
