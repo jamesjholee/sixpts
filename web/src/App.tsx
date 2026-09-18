@@ -71,14 +71,15 @@ export default function App() {
 
   // ---- data
   const [data, setData] = useState<Board | null>(null); const [err, setErr] = useState('')
-  const [books, setBooks] = useState<BookMap>({}); const [mp, setMp] = useState<any>(null); const [tick, setTick] = useState(0)
+  const [books, setBooks] = useState<BookMap>({}); const [mp, setMp] = useState<any>(null); const [tick, setTick] = useState(0); const [live, setLive] = useState<any[]>([])
   const [market, setMarket] = useState<'td' | 'rec'>('td')
   useEffect(() => {
     if (!week) return
     const url = token ? `${API}/api/private/board/${week}` : `${API}/api/board/${week}`
     fetch(url, { headers: token ? { 'X-Token': token } : {} }).then(async r => { if (!r.ok) { if (r.status === 401) throw new Error('Admin key rejected'); const j = await r.json().catch(() => ({})); const d = j.detail || {}; throw new Error(d.latest ? `Week ${week} isn't published yet. Latest is Week ${d.latest}.` : `Week ${week} isn't published yet.`) } return r.json() }).then(d => { setData(d); track('board_view', { week }) }).catch(e => setErr(e.message))
   }, [week, token])
-  useEffect(() => { if (!canSave) return; fetch(`${API}/api/odds/${week}?market=${market === 'rec' ? 'receptions' : 'anytime_td'}`, { headers: authHeaders() }).then(r => r.ok ? r.json() : {}).then(setBooks).catch(() => {}) }, [week, market, canSave, tick])
+  useEffect(() => { if (!week) return; const pull = () => fetch(`${API}/api/live/${week}`).then(r => r.ok ? r.json() : null).then(d => d && setLive(d.touchdowns || [])).catch(() => {}); pull(); const t = setInterval(pull, 30000); return () => clearInterval(t) }, [week])
+  useEffect(() => { if (!week) return; fetch(`${API}/api/odds/${week}?market=${market === 'rec' ? 'receptions' : 'anytime_td'}`, { headers: authHeaders() }).then(r => r.ok ? r.json() : {}).then(setBooks).catch(() => {}) }, [week, market, canSave, tick, session, token])
 
   // ---- ui state
   const key = `sixpts_w${week}_${market}`
@@ -86,10 +87,19 @@ export default function App() {
   useEffect(() => { try { setStore(JSON.parse(localStorage.getItem(key) || '{}')) } catch { setStore({}) } }, [key])
   useEffect(() => { try { localStorage.setItem(key, JSON.stringify(store)) } catch {} }, [store, key])
   useEffect(() => { if (market !== 'td' || !week) return
-    if (canSave) { fetch(`${API}/api/model-picks/${week}`).then(r => r.ok ? r.json() : null).then(setMp).catch(() => {}); return }
-    const prices: Record<string, number> = {}; for (const [k, v] of Object.entries(store)) { const n = Number(v?.odds); if (n) prices[k] = n }
-    fetch(`${API}/api/evaluate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ week, prices }) }).then(r => r.ok ? r.json() : null).then(setMp).catch(() => {})
-  }, [week, market, tick, canSave, store])
+    const typed: Record<string, number> = {}; for (const [k, v] of Object.entries(store)) { const n = Number(v?.odds); if (n) typed[k] = n }
+    fetch(`${API}/api/model-picks/${week}`, { headers: authHeaders() }).then(r => r.ok ? r.json() : null).then(async (server) => {
+      if (server && server.priced > 0 && Object.keys(typed).length === 0) return setMp(server)
+      // blend: anything you typed overrides the feed
+      const mine = await fetch(`${API}/api/evaluate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ week, prices: typed }) }).then(r => r.ok ? r.json() : null).catch(() => null)
+      if (!server) return setMp(mine)
+      if (!mine || mine.priced === 0) return setMp(server)
+      const byId = (c: any) => c.gsis_id + c.game_id
+      const over = new Set([...mine.bets, ...mine.leans, ...mine.passes].map(byId))
+      const merge = (k: 'bets' | 'leans' | 'passes') => [...mine[k], ...server[k].filter((c: any) => !over.has(byId(c)))]
+      setMp({ ...server, priced: server.priced + mine.priced, bets: merge('bets'), leans: merge('leans'), passes: merge('passes') })
+    }).catch(() => {})
+  }, [week, market, tick, canSave, store, session, token])
   const [pos, setPos] = useState(''); const [game, setGame] = useState(''); const [minp, setMinp] = useState(15)
   const [onlyEdge, setOnlyEdge] = useState(false); const [onlyPicks, setOnlyPicks] = useState(false); const [q, setQ] = useState('')
   const [sort, setSort] = useState<{ k: string; dir: 1 | -1 }>({ k: 'edge', dir: -1 })
@@ -167,6 +177,10 @@ export default function App() {
 
   const nBook = Object.keys(books).length
   return shell(<>
+    {live.length > 0 && <div className="panel"><div className="head"><h2>Touchdowns today</h2><span className="muted">{live.length} · what we said before the game</span></div>
+      <div className="body live">{[...live].reverse().slice(0, 12).map((t: any, i: number) => { const r = data.board.find(x => x.player.toLowerCase().replace(/[.']/g, '') === String(t.scorer).toLowerCase().replace(/[.']/g, ''))
+        return <div key={i} className="td-row"><b>{t.scorer}</b> <span className="muted">{t.team} · {t.yards ? `${t.yards} yd ${t.how}` : t.how} · Q{t.quarter} {t.clock}</span>
+          {r ? <span className={'match ' + (r.p_model >= .3 ? 'fav' : '')}>we said {Math.round(r.p_model * 100)}%</span> : <span className="match">not on our board</span>}</div> })}</div></div>}
     <HowTo />
     {data.injury_report && data.injury_report.startsWith('not') && <div className="banner">Injury report {data.injury_report}. Availability notes appear once it's loaded — verify a player is active before kickoff.</div>}
 
@@ -178,7 +192,7 @@ export default function App() {
     {market === 'td' && mp && <div className="panel">
       <div className="head" onClick={togglePicks}><h2>SixPts picks</h2><span className="muted">{mp.priced ? `${mp.bets.length} bet · ${mp.leans.length} lean · ${mp.passes.length} pass` : 'no prices loaded'}</span><span className="caret">{picksOpen ? '▾' : '▸'}</span></div>
       {picksOpen && <div className="body">
-        {mp.priced === 0 ? <p className="muted">The model only picks among priced players. Load odds (pf_odds) or type a book price on any row.</p> : <>
+        {mp.priced === 0 ? <p className="muted">Prices aren't posted for this week yet. Type the price your book is offering on any row and the model will reason over it.</p> : <>
           <div className="bar" style={{ margin: '10px 0 4px' }}><div className="seg">{(['bets', 'leans', 'passes'] as const).map(t => <button key={t} className={tier === t ? 'on' : ''} onClick={() => setTier(t)}>{t === 'bets' ? 'Bet' : t === 'leans' ? 'Lean' : 'Pass'} · {mp[t].filter((c: any) => !game || c.game_id === game).length}</button>)}</div>
             <span className="muted">{tier === 'bets' ? '5+ pts edge, all-but-one signals green, high certainty' : tier === 'leans' ? 'edge, but mixed signals or lower certainty' : 'no edge at the price, a red flag, or too few green signals — tap a row for why'}</span></div>
           {mp[tier].filter((c: any) => !game || c.game_id === game).length === 0 && <p className="muted">None{game ? ' in this game' : ''} at current prices.</p>}

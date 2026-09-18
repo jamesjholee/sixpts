@@ -70,13 +70,19 @@ def add_odds(o: Odds, x_token: str = Header(default=""), authorization: str = He
                   {"g": o.gsis_id, "ga": o.game_id, "m": o.market, "l": o.line, "b": o.book, "p": o.price, "u": None if uid == "admin" else uid})
     return {"ok": True}
 
+def _odds_rows(week: int, market: str, include_private: bool):
+    q = ("select gsis_id, game_id, book, price, fetched_at from odds where market=:m and game_id like :w"
+         + ("" if include_private else " and source <> 'pf'") + " order by fetched_at desc")
+    with ENGINE.begin() as c:
+        return c.execute(text(q), {"m": market, "w": f"%_{week:02d}_%"}).mappings().all()
+
 @app.get("/api/odds/{week}")
 def odds_for_week(week: int, market: str = "anytime_td", x_token: str = Header(default=""), authorization: str = Header(default="")):
-    """Latest price per player per book for the week. Private: PropFinder-sourced prices never render publicly."""
-    _user(x_token, authorization)
-    with ENGINE.begin() as c:
-        rows = c.execute(text("select gsis_id, game_id, book, price, fetched_at from odds where market=:m and game_id like :w order by fetched_at desc"),
-                         {"m": market, "w": f"%_{week:02d}_%"}).mappings().all()
+    """Licensed odds (The Odds API) are public. PropFinder-sourced prices are added only for the admin/signed-in view."""
+    private = False
+    try: private = _user(x_token, authorization) is not None
+    except HTTPException: private = False
+    rows = _odds_rows(week, market, include_private=private)
     out: dict = {}
     for r in rows:
         k = f"{r['gsis_id']}|{r['game_id']}"
@@ -85,12 +91,14 @@ def odds_for_week(week: int, market: str = "anytime_td", x_token: str = Header(d
     return out
 
 @app.get("/api/model-picks/{week}")
-def model_picks(week: int, market: str = "anytime_td"):
-    """The model's picks with reasoning. Uses the best stored price per player; players without a price are listed as 'No price'."""
+def model_picks(week: int, market: str = "anytime_td", x_token: str = Header(default=""), authorization: str = Header(default="")):
+    """The model's picks with reasoning, over the best stored price per player.
+    Public visitors get licensed odds; the admin view also sees PropFinder-sourced prices."""
     board = _load(week, public=True)["board"]
-    with ENGINE.begin() as c:
-        rows = c.execute(text("select gsis_id, game_id, book, price, fetched_at from odds where market=:m and game_id like :w order by fetched_at desc"),
-                         {"m": market, "w": f"%_{week:02d}_%"}).mappings().all()
+    private = False
+    try: private = _user(x_token, authorization) is not None
+    except HTTPException: private = False
+    rows = _odds_rows(week, market, include_private=private)
     latest = {}
     for r in rows:                                   # latest per (player, book), then best price across books
         k = (r["gsis_id"], r["game_id"], r["book"])
@@ -170,6 +178,12 @@ def record(x_token: str = Header(default="")):
         rows = c.execute(text("select market, count(*) n, sum(case when result='won' then 1 else 0 end) won, sum(case when result='lost' then 1 else 0 end) lost, "
                               "sum(coalesce(pnl_units,0)) pnl, avg(clv) clv from picks where result is not null group by market")).mappings().all()
     return [dict(r) for r in rows]
+
+@app.get("/api/live/{week}")
+def live(week: int):
+    """Touchdowns as they happen, with what we said before the game. Written by engine.live_td."""
+    f = DATA / f"live_td_w{week}.json"
+    return {"week": week, "touchdowns": json.load(open(f)) if f.exists() else []}
 
 @app.get("/api/scorecard/{week}")
 def scorecard(week: int):

@@ -1,0 +1,15 @@
+[{"id":"a1","sport_key":"americanfootball_nfl","commence_time":"2026-09-20T17:00:00Z","home_team":"Dallas Cowboys","away_team":"Washington Commanders",
+ "bookmakers":[
+  {"key":"draftkings","title":"DraftKings","last_update":"2026-09-18T14:00:00Z","markets":[{"key":"player_anytime_td","last_update":"2026-09-18T14:00:00Z","outcomes":[
+    {"name":"Yes","description":"Javonte Williams","price":-195},{"name":"Yes","description":"CeeDee Lamb","price":115},
+    {"name":"Yes","description":"George Pickens","price":150},{"name":"Yes","description":"Jacory Croskey-Merritt","price":120},
+    {"name":"No","description":"CeeDee Lamb","price":-150},{"name":"Yes","description":"Unknown Guy","price":900}]}]},
+  {"key":"fanduel","title":"FanDuel","last_update":"2026-09-18T14:00:00Z","markets":[{"key":"player_anytime_td","outcomes":[
+    {"name":"Yes","description":"Javonte Williams","price":-175},{"name":"Yes","description":"CeeDee Lamb","price":105},
+    {"name":"Yes","description":"George Pickens","price":160},{"name":"Yes","description":"Jacory Croskey-Merritt","price":105}]}]},
+  {"key":"betmgm","title":"BetMGM","markets":[{"key":"player_anytime_td","outcomes":[
+    {"name":"Yes","description":"Javonte Williams","price":-175},{"name":"Yes","description":"CeeDee Lamb","price":105},
+    {"name":"Yes","description":"George Pickens","price":135}]}]}]},
+ {"id":"a2","home_team":"Buffalo Bills","away_team":"Detroit Lions","bookmakers":[
+  {"key":"draftkings","markets":[{"key":"player_anytime_td","outcomes":[
+    {"name":"Yes","description":"James Cook","price":-180},{"name":"Yes","description":"Amon-Ra St. Brown","price":100}]}]}]}]

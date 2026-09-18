@@ -169,3 +169,7 @@ tr.row{cursor:pointer} tr.row:hover td{background:var(--bg-2)} tr.row.open td{ba
 .gate{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
 .gate-box{max-width:460px;background:var(--bg-1);border:1px solid var(--line);border-radius:12px;padding:28px}
 .gate-box .btn{margin-top:8px}
+
+.live .td-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:7px 0;border-bottom:1px solid var(--line)}
+.live .td-row:last-child{border-bottom:0}
+.live .td-row .match{margin-left:auto}
