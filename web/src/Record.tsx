@@ -11,7 +11,8 @@ export default function Record() {
     const all = await Promise.all((d.weeks || []).map((w: number) => fetch(`${API}/api/scorecard/${w}`).then(r => r.ok ? r.json() : null)))
     setCards(all.filter(Boolean).reverse()) }).catch(() => {}) }, [])
   if (err) return <p className="empty">{err}</p>
-  if (!d) return <p className="empty">Loading record…</p>
+  if (!d) return <div className="sk-rows" aria-busy="true" aria-label="Loading the record">{Array.from({length:5}).map((_,i)=>(
+    <div className="sk-row" key={i}><div className="skeleton" style={{width:'55%'}}/><div className="skeleton" style={{width:'70%'}}/><div className="skeleton"/><div className="skeleton"/><div className="skeleton" style={{width:'80%'}}/></div>))}</div>
   return (<div>
     <div className="bar"><h1>Record</h1><span className="muted">every graded pick, at the price taken. CLV = closing-line value: how much better than the closing price we bet, in probability points. Positive over 60+ picks is the real evidence of edge; win rate alone isn't.</span></div>
     {cards.length > 0 && <div className="panel"><div className="head"><h2>How the model did</h2><span className="muted">every player on the published board, graded against what happened</span></div>

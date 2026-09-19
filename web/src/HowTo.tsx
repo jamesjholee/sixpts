@@ -3,7 +3,7 @@ export default function HowTo() {
   const [open, setOpen] = useState(() => { try { return localStorage.getItem('sixpts_howto') !== '0' } catch { return true } })
   const toggle = () => setOpen(o => { try { localStorage.setItem('sixpts_howto', o ? '0' : '1') } catch {} ; return !o })
   return (<div className="panel">
-    <div className="head" onClick={toggle}><h2>How to read this</h2><span className="caret">{open ? '▾' : '▸'}</span></div>
+    <div className="head" onClick={toggle}><h2>How to read this</h2><span className="caret" style={{ transform: open ? 'rotate(90deg)' : 'none' }}>▸</span></div>
     {open && <div className="body howto">
       <p><b>P(TD)</b> is our probability that the player scores a touchdown, from where his touches happen, blended with last season, adjusted for the game and the defense. <b>Fair</b> is that probability as odds with no vig.</p>
       <p><b>Book</b> — type the price your sportsbook is offering. <b>Edge</b> is our probability minus the book's; 3+ points is flagged. The SixPts picks panel then reasons over every price you've entered: <b>Bet</b> needs 5+ points of edge and nearly every signal green, <b>Lean</b> has edge but mixed signals, <b>Pass</b> says exactly why.</p>

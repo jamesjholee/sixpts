@@ -1,0 +1,67 @@
+/* SixPts design tokens — one source of truth for the landing page and the product.
+
+   Identity: a stadium scoreboard. Deep blue-black, field-paint white, one incandescent amber.
+   Amber is the brand and marks the single most important thing on any screen.
+   Green and red are reserved for meaning (a price is good / bad), never for decoration.
+   Dark only: this is a scoreboard, and a light variant would be a different product. */
+
+:root{
+  /* surfaces, back to front */
+  --ink:#070A0F;
+  --surface:#0D131C;
+  --raise:#131C28;
+  --raise-2:#1A2431;
+  --line:#1E2836;
+  --line-strong:#2B3949;
+
+  /* text */
+  --paint:#EEF2F6;
+  --dim:#8794A5;
+  --faint:#5D6878;
+
+  /* brand */
+  --bulb:#FFB020;
+  --bulb-hi:#FFC247;
+  --bulb-dim:rgba(255,176,32,.14);
+  --on-bulb:#0A0D12;
+
+  /* meaning */
+  --gain:#35C77F;  --gain-dim:rgba(53,199,127,.14);
+  --loss:#F2555A;  --loss-dim:rgba(242,85,90,.13);
+  --warn:#FFB020;  --warn-dim:rgba(255,176,32,.14);
+
+  /* type */
+  --display:Archivo,Inter,-apple-system,sans-serif;
+  --text:Inter,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --wide:"wdth" 118;
+
+  /* space */
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px; --s7:48px;
+  --r-sm:3px; --r:6px; --r-lg:10px;
+
+  /* motion — everything animated uses one of these three */
+  --quick:120ms;            /* state you caused: a toggle, a hover */
+  --settle:260ms;           /* something opening or arriving */
+  --tell:900ms;             /* look here: a price moved, a touchdown landed */
+  --ease:cubic-bezier(.2,.8,.25,1);
+}
+
+@media (prefers-reduced-motion: reduce){
+  :root{ --quick:0ms; --settle:0ms; --tell:0ms; }
+  *,*::before,*::after{ animation-duration:.001ms !important; animation-iteration-count:1 !important; transition-duration:.001ms !important; }
+}
+
+/* ---- the four motions the app is allowed to use ---- */
+
+/* arriving content: a short rise, staggered only across the first rows so the page
+   settles rather than performing */
+@keyframes rise{ from{ opacity:0; transform:translateY(6px) } to{ opacity:1; transform:none } }
+
+/* a number changed while you were looking at it */
+@keyframes flash{ 0%{ background:var(--bulb-dim) } 100%{ background:transparent } }
+
+/* something just happened in the real world (a touchdown) */
+@keyframes land{ 0%{ box-shadow:inset 3px 0 0 var(--bulb); background:var(--bulb-dim) } 100%{ box-shadow:inset 3px 0 0 transparent; background:transparent } }
+
+/* waiting for data, instead of the word "Loading" */
+@keyframes sweep{ from{ background-position:-260px 0 } to{ background-position:260px 0 } }

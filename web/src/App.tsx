@@ -75,15 +75,29 @@ export default function App() {
 
   // ---- data
   const [data, setData] = useState<Board | null>(null); const [err, setErr] = useState('')
-  const [books, setBooks] = useState<BookMap>({}); const [mp, setMp] = useState<any>(null); const [tick, setTick] = useState(0); const [live, setLive] = useState<any[]>([])
+  const [books, setBooks] = useState<BookMap>({}); const [moved, setMoved] = useState<Set<string>>(new Set()); const [mp, setMp] = useState<any>(null); const [tick, setTick] = useState(0); const [live, setLive] = useState<any[]>([]); const [freshTd, setFreshTd] = useState<Set<string>>(new Set())
   const [market, setMarket] = useState<'td' | 'rec'>('td')
   useEffect(() => {
     if (!week) return
     const url = token ? `${API}/api/private/board/${week}` : `${API}/api/board/${week}`
     fetch(url, { headers: token ? { 'X-Token': token } : {} }).then(async r => { if (!r.ok) { if (r.status === 401) throw new Error('Admin key rejected'); const j = await r.json().catch(() => ({})); const d = j.detail || {}; throw new Error(d.latest ? `Week ${week} isn't published yet. Latest is Week ${d.latest}.` : `Week ${week} isn't published yet.`) } return r.json() }).then(d => { setData(d); track('board_view', { week }) }).catch(e => setErr(e.message))
   }, [week, token])
-  useEffect(() => { if (!week) return; const pull = () => fetch(`${API}/api/live/${week}`).then(r => r.ok ? r.json() : null).then(d => d && setLive(d.touchdowns || [])).catch(() => {}); pull(); const t = setInterval(pull, 30000); return () => clearInterval(t) }, [week])
-  useEffect(() => { if (!week) return; fetch(`${API}/api/odds/${week}?market=${market === 'rec' ? 'receptions' : 'anytime_td'}`, { headers: authHeaders() }).then(r => r.ok ? r.json() : {}).then(setBooks).catch(() => {}) }, [week, market, canSave, tick, session, token])
+  useEffect(() => { if (!week) return; const pull = () => fetch(`${API}/api/live/${week}`).then(r => r.ok ? r.json() : null).then(d => { if (!d) return
+      setLive(prev => { const seen = new Set(prev.map((t: any) => t.play_id))
+        const fresh = (d.touchdowns || []).filter((t: any) => prev.length && !seen.has(t.play_id)).map((t: any) => t.play_id)
+        if (fresh.length) { setFreshTd(new Set(fresh)); setTimeout(() => setFreshTd(new Set()), 2400) }
+        return d.touchdowns || [] }) }).catch(() => {}); pull(); const t = setInterval(pull, 30000); return () => clearInterval(t) }, [week])
+  useEffect(() => { if (!week) return; fetch(`${API}/api/odds/${week}?market=${market === 'rec' ? 'receptions' : 'anytime_td'}`, { headers: authHeaders() }).then(r => r.ok ? r.json() : {})
+      .then((next: BookMap) => {
+        setBooks(prev => {
+          if (Object.keys(prev).length) {
+            const changed = new Set<string>()
+            for (const [id, bk] of Object.entries(next)) for (const [b, p] of Object.entries(bk)) if (prev[id]?.[b] !== undefined && prev[id][b] !== p) changed.add(id)
+            if (changed.size) { setMoved(changed); setTimeout(() => setMoved(new Set()), 1200) }
+          }
+          return next
+        })
+      }).catch(() => {}) }, [week, market, canSave, tick, session, token])
 
   // ---- ui state
   const key = `sixpts_w${week}_${market}`
@@ -176,7 +190,12 @@ export default function App() {
 
   if (view === 'home') return <Landing onEnter={enter} />
   if (err) return shell(<p className="empty">{err}</p>)
-  if (!data) return shell(<p className="empty">{week ? `Loading week ${week}…` : 'Loading…'}</p>)
+  if (!data) return shell(<div className="sk-rows" aria-busy="true" aria-label="Loading the board">
+    {Array.from({ length: 8 }).map((_, i) => <div className="sk-row" key={i}>
+      <div className="skeleton" style={{ width: `${58 + (i % 3) * 12}%` }} /><div className="skeleton" style={{ width: '70%' }} />
+      <div className="skeleton" /><div className="skeleton" /><div className="skeleton" style={{ width: '80%' }} />
+    </div>)}
+  </div>)
   if (view === 'games') return shell(<Games week={week} season={data.season} />)
   if (view === 'record') return shell(<Record />)
 
@@ -184,7 +203,7 @@ export default function App() {
   return shell(<>
     {live.length > 0 && <div className="panel"><div className="head"><h2>Touchdowns today</h2><span className="muted">{live.length} · what we said before the game</span></div>
       <div className="body live">{[...live].reverse().slice(0, 12).map((t: any, i: number) => { const r = data.board.find(x => x.player.toLowerCase().replace(/[.']/g, '') === String(t.scorer).toLowerCase().replace(/[.']/g, ''))
-        return <div key={i} className="td-row"><b>{t.scorer}</b> <span className="muted">{t.team} · {t.yards ? `${t.yards} yd ${t.how}` : t.how} · Q{t.quarter} {t.clock}</span>
+        return <div key={t.play_id || i} className={'td-row' + (freshTd.has(t.play_id) ? ' new' : '')}><b>{t.scorer}</b> <span className="muted">{t.team} · {t.yards ? `${t.yards} yd ${t.how}` : t.how} · Q{t.quarter} {t.clock}</span>
           {r ? <span className={'match ' + (r.p_model >= .3 ? 'fav' : '')}>we said {Math.round(r.p_model * 100)}%</span> : <span className="match">not on our board</span>}</div> })}</div></div>}
     <HowTo />
     {data.injury_report && data.injury_report.startsWith('not') && <div className="banner">Injury report {data.injury_report}. Availability notes appear once it's loaded — verify a player is active before kickoff.</div>}
@@ -195,7 +214,7 @@ export default function App() {
     </div>
 
     {market === 'td' && mp && <div className="panel">
-      <div className="head" onClick={togglePicks}><h2>SixPts picks</h2><span className="muted">{mp.priced ? `${mp.bets.length} bet · ${mp.leans.length} lean · ${mp.passes.length} pass` : 'no prices loaded'}</span><span className="caret">{picksOpen ? '▾' : '▸'}</span></div>
+      <div className="head" onClick={togglePicks}><h2>SixPts picks</h2><span className="muted">{mp.priced ? `${mp.bets.length} bet · ${mp.leans.length} lean · ${mp.passes.length} pass` : 'no prices loaded'}</span><span className="caret" style={{ transform: picksOpen ? 'rotate(90deg)' : 'none' }}>▸</span></div>
       {picksOpen && <div className="body">
         {mp.priced === 0 ? <p className="muted">Prices aren't posted for this week yet. Type the price your book is offering on any row and the model will reason over it.</p> : <>
           <div className="bar" style={{ margin: '10px 0 4px' }}><div className="seg">{(['bets', 'leans', 'passes'] as const).map(t => <button key={t} className={tier === t ? 'on' : ''} onClick={() => setTier(t)}>{t === 'bets' ? 'Bet' : t === 'leans' ? 'Lean' : 'Pass'} · {mp[t].filter((c: any) => !game || c.game_id === game).length}</button>)}</div>
@@ -259,9 +278,9 @@ export default function App() {
             {show('team') && <td className="l">{r.spread > 0 ? '+' : ''}{r.spread} vs {r.opp} <span className={'match ' + mc}>{ml}</span></td>}
             <td className="num"><span className={'p ' + heat(r.p_model)}>{market === 'rec' && !r.recLine ? '—' : pct(r.p_model)}</span></td>
             {show('fair_odds') && <td className="num">{market === 'rec' && !r.recLine ? '—' : fmtOdds(r.fair_odds)}</td>}
-            {show('book') && <td className="l" onClick={e => e.stopPropagation()}>{bb ? <span className="books">{Object.entries(bb).map(([b, p]) => <span key={b} className={'book' + (best?.[0] === b ? ' best' : '') + (s.book === b ? ' on' : '')} title={s.book === b ? 'Using this price' : 'Click to use this price'} onClick={() => useBook(r, b, p as number)}><small>{BOOK_ABBR[b] || b}</small><b>{fmtOdds(p as number)}</b></span>)}</span>
+            {show('book') && <td className={'l' + (moved.has(id) ? ' moved' : '')} onClick={e => e.stopPropagation()}>{bb ? <span className="books">{Object.entries(bb).map(([b, p]) => <span key={b} className={'book' + (best?.[0] === b ? ' best' : '') + (s.book === b ? ' on' : '')} title={s.book === b ? 'Using this price' : 'Click to use this price'} onClick={() => useBook(r, b, p as number)}><small>{BOOK_ABBR[b] || b}</small><b>{fmtOdds(p as number)}</b></span>)}</span>
               : <input className="odds" type="number" step={5} placeholder="+150" value={s.odds || ''} onChange={e => setManual(r, e.target.value)} onBlur={() => saveManual(r)} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} />}</td>}
-            {show('edge') && <td className="num">{r.edge == null ? <span className="muted">—</span> : <span className={'edge ' + (r.edge >= 0 ? 'pos' : 'neg')}>{r.edge >= .03 ? <span className="flag">{pts(r.edge)}</span> : pts(r.edge)}</span>}</td>}
+            {show('edge') && <td className={'num' + (moved.has(id) ? ' moved' : '')}>{r.edge == null ? <span className="muted">—</span> : <span className={'edge ' + (r.edge >= 0 ? 'pos' : 'neg')}>{r.edge >= .03 ? <span className="flag">{pts(r.edge)}</span> : pts(r.edge)}</span>}</td>}
             {market === 'rec' && <td className="num">{n1(r.exp_targets, 1)} / {n1(r.exp_rec, 1)}</td>}
             {market === 'rec' && <td onClick={e => e.stopPropagation()}><input className="odds" type="number" step={0.5} placeholder="4.5" value={r.recLine} onChange={e => setStore(st => ({ ...st, [id]: { ...st[id], recLine: e.target.value } }))} /></td>}
             {show('xtd_pg_shrunk') && <td className="num">{n1(r.xtd_pg_shrunk)}</td>}{show('rz_tgt_pg') && <td className="num">{n1(r.rz_tgt_pg, 1)}</td>}{show('ez_tgt_pg') && <td className="num">{n1(r.ez_tgt_pg, 1)}</td>}{show('rz_carry_pg') && <td className="num">{n1(r.rz_carry_pg, 1)}</td>}{show('i5_carry_pg') && <td className="num">{n1(r.i5_carry_pg, 1)}</td>}
