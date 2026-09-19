@@ -10,7 +10,9 @@ h1,h2,.wordmark,.big,td.num,.p,.tier,.lp-mark{font-family:var(--display);font-va
 /* ---------- shell ---------- */
 .top{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--surface) 92%,transparent);backdrop-filter:blur(8px);
   border-bottom:1px solid var(--line);display:flex;align-items:center;gap:var(--s4);padding:0 var(--s4);height:54px}
-.wordmark{font-weight:700;letter-spacing:-.02em;font-size:18px;display:flex;align-items:center;gap:9px}
+.wordmark{font-weight:700;letter-spacing:-.02em;font-size:18px;display:flex;align-items:center;gap:9px;cursor:pointer;
+  text-decoration:none;transition:opacity var(--quick) var(--ease)}
+.wordmark:hover{opacity:.8}
 .wordmark i{width:8px;height:16px;border-radius:1px;background:var(--bulb);display:inline-block}
 .nav{display:flex;gap:2px;margin-left:var(--s3)}
 .nav a{padding:7px 11px;border-radius:var(--r-sm);color:var(--dim);text-decoration:none;font-weight:500;cursor:pointer;

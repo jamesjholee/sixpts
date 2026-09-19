@@ -178,7 +178,8 @@ export default function App() {
   // ---- shell
   const shell = (body: React.ReactNode) => (<>
     <div className="top">
-      <div className="wordmark"><i />SixPts</div>
+      <a className="wordmark" onClick={() => go('home')} title="About SixPts" role="link" tabIndex={0}
+         onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') go('home') }}><i />SixPts</a>
       <nav className="nav">{[['board', 'Board'], ['games', 'Games'], ['record', 'Record']].map(([v, l]) => <a key={v} className={view === v ? 'on' : ''} onClick={() => go(v)}>{l}</a>)}</nav>
       <div className="right">
         <div className="week"><button onClick={() => go(view, Math.max(1, week - 1))}>‹</button><span>Week {week}</span><button onClick={() => go(view, week + 1)}>›</button></div>
@@ -188,7 +189,7 @@ export default function App() {
     </div>
     <div className="wrap">{body}</div></>)
 
-  if (view === 'home') return <Landing onEnter={enter} />
+  if (view === 'home') return <Landing onEnter={enter} entered={entered} />
   if (err) return shell(<p className="empty">{err}</p>)
   if (!data) return shell(<div className="sk-rows" aria-busy="true" aria-label="Loading the board">
     {Array.from({ length: 8 }).map((_, i) => <div className="sk-row" key={i}>

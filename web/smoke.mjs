@@ -33,6 +33,13 @@ const lh = document.body.innerHTML
 console.log('landing renders:', lh.includes('where the ball already is'), '| proof table:', lh.includes('They actually scored'))
 localStorage.setItem('sixpts_21','1')
 
+// back to landing after entering (wordmark route)
+localStorage.setItem('sixpts_21','1')
+dom.reconfigure({ url: 'http://localhost/?view=home' })
+const rootB = createRoot(document.body.appendChild(document.createElement('div')))
+await act(async () => { rootB.render(React.createElement(App)) }); await new Promise(r => setTimeout(r, 250)); await act(async () => {})
+console.log('landing reachable after entering:', document.body.innerHTML.includes('Back to the board'))
+
 // games view
 dom.reconfigure({ url: 'http://localhost/?week=2&view=games' })
 const root2 = createRoot(document.body.appendChild(document.createElement('div')))

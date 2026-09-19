@@ -14,7 +14,7 @@ const PASS = [
 
 type Card = { week: number; n_players: number; actual_rate: number; mean_prediction: number; top20_hit_rate: number; calibration: { bucket: string; n: number; predicted: number; actual: number }[] }
 
-export default function Landing({ onEnter }: { onEnter: () => void }) {
+export default function Landing({ onEnter, entered = false }: { onEnter: () => void; entered?: boolean }) {
   const [card, setCard] = useState<Card | null>(null)
   const [drawn, setDrawn] = useState(false)
   const field = useRef<HTMLDivElement>(null)
@@ -36,7 +36,7 @@ export default function Landing({ onEnter }: { onEnter: () => void }) {
     <div className="lp">
       <header className="lp-top">
         <div className="lp-mark">SixPts</div>
-        <button className="lp-enter" onClick={onEnter}>Open the board</button>
+        <button className="lp-enter" onClick={onEnter}>{entered ? 'Back to the board' : 'Open the board'}</button>
       </header>
 
       <section className="lp-hero">
@@ -127,9 +127,9 @@ export default function Landing({ onEnter }: { onEnter: () => void }) {
         <h2>Free, and it argues with you.</h2>
         <p className="lp-body">
           The board, the team pages and the record are open. Type in the price you're being offered and the model
-          will tell you to bet it, lean it, or pass — and why. You must be 21 or older to continue.
+          will tell you to bet it, lean it, or pass — and why.{entered ? '' : ' You must be 21 or older to continue.'}
         </p>
-        <button className="lp-enter lp-big" onClick={onEnter}>Open the board</button>
+        <button className="lp-enter lp-big" onClick={onEnter}>{entered ? 'Back to the board' : 'Open the board'}</button>
         <p className="lp-fine">
           SixPts is a research tool. It doesn't take bets and it isn't advice. Gambling problem? Call 1-800-GAMBLER.
           Data from nflverse and The Odds API.
