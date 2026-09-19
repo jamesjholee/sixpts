@@ -16,6 +16,13 @@ from sqlalchemy import text, inspect
 
 TEAM_COL = ["abbr", "nfl_abbr"]
 
+def _insert(conn, sql: str, rows: list[dict], chunk: int = 1000):
+    """Explicit parameterised insert. pandas' to_sql infers every object column as text, which
+    makes Postgres reject a date column; binding real Python values avoids the cast entirely."""
+    for i in range(0, len(rows), chunk):
+        batch = rows[i:i + chunk]
+        if batch: conn.execute(text(sql), batch)
+
 def _existing(conn, table: str, col: str) -> set:
     return {r[0] for r in conn.execute(text(f"select {col} from {table}")).all()}
 
@@ -34,7 +41,7 @@ def main(refresh: bool = False):
     with eng.begin() as c:
         have = _existing(c, "teams", "abbr")
         new = [{"abbr": a, "name": a} for a in abbrs if a not in have]
-        if new: pd.DataFrame(new).to_sql("teams", c, if_exists="append", index=False)
+        _insert(c, "insert into teams (abbr, name) values (:abbr, :name)", new)
     print(f"teams: {len(abbrs)} known, {len(new)} added")
 
     # ---- players ----
@@ -44,27 +51,51 @@ def main(refresh: bool = False):
     with eng.begin() as c:
         have = _existing(c, "players", "gsis_id")
         valid_teams = _existing(c, "teams", "abbr")
-        add = p[~p.gsis_id.isin(have)].copy()
-        if "team" in add: add.loc[~add.team.isin(valid_teams), "team"] = None   # FK on teams
-        if len(add): add.to_sql("players", c, if_exists="append", index=False, chunksize=2000)
-    print(f"players: {len(p)} known, {len(add)} added")
+        add = p[~p.gsis_id.isin(have)]
+        recs = []
+        for r in add.itertuples(index=False):
+            d = {k: (None if pd.isna(getattr(r, k, None)) else getattr(r, k)) for k in keep}
+            if d.get("team") not in valid_teams: d["team"] = None
+            recs.append({"gsis_id": d["gsis_id"], "name": d.get("name"), "position": d.get("position"), "team": d.get("team")})
+        _insert(c, "insert into players (gsis_id, name, position, team) values (:gsis_id, :name, :position, :team)", recs)
+    print(f"players: {len(p)} known, {len(recs)} added")
 
     # ---- games ----
     g = games.rename(columns={"home_team": "home", "away_team": "away", "gameday": "kickoff"})
-    g = g[[c for c in ["game_id", "season", "week", "kickoff", "home", "away", "spread_line", "total_line", "result"] if c in g.columns]]
-    g = g.dropna(subset=["game_id"]).drop_duplicates("game_id")
-    g = g.astype(object).where(pd.notna(g), None)
+    cols = [c for c in ["game_id", "season", "week", "kickoff", "home", "away", "spread_line", "total_line", "result"] if c in g.columns]
+    g = g[cols].dropna(subset=["game_id"]).drop_duplicates("game_id")
+    g["kickoff"] = pd.to_datetime(g.kickoff, errors="coerce").dt.date        # real date objects, not strings
     with eng.begin() as c:
         have = _existing(c, "games", "game_id")
+        valid = _existing(c, "teams", "abbr")
+        keepable = g.home.isin(valid) & g.away.isin(valid)
+        skipped = int((~keepable).sum())                                     # relocated franchises (SD, STL, OAK)
+        g = g[keepable]
         add_g = g[~g.game_id.isin(have)]
-        if len(add_g): add_g.to_sql("games", c, if_exists="append", index=False, chunksize=2000)
+        recs_g = []
+        for r in add_g.itertuples(index=False):
+            recs_g.append(dict(
+                game_id=r.game_id,
+                season=None if pd.isna(r.season) else int(r.season),
+                week=None if pd.isna(r.week) else int(r.week),
+                kickoff=None if pd.isna(r.kickoff) else r.kickoff,           # datetime.date -> DATE
+                home=r.home, away=r.away,
+                spread_line=None if pd.isna(getattr(r, "spread_line", None)) else float(r.spread_line),
+                total_line=None if pd.isna(getattr(r, "total_line", None)) else float(r.total_line),
+                result=None if pd.isna(getattr(r, "result", None)) else float(r.result)))
+        _insert(c, """insert into games (game_id, season, week, kickoff, home, away, spread_line, total_line, result)
+                      values (:game_id, :season, :week, :kickoff, :home, :away, :spread_line, :total_line, :result)""", recs_g)
         updated = 0
         if refresh:
-            for r in g[g.game_id.isin(have)].itertuples(index=False):
-                c.execute(text("update games set spread_line=:s, total_line=:t, result=:r where game_id=:g"),
-                          {"s": r.spread_line, "t": r.total_line, "r": getattr(r, "result", None), "g": r.game_id})
-                updated += 1
-    print(f"games: {len(g)} known, {len(add_g)} added" + (f", {updated} refreshed" if refresh else ""))
+            upd = [dict(g=r.game_id, s=None if pd.isna(getattr(r, "spread_line", None)) else float(r.spread_line),
+                        t=None if pd.isna(getattr(r, "total_line", None)) else float(r.total_line),
+                        r=None if pd.isna(getattr(r, "result", None)) else float(r.result))
+                   for r in g[g.game_id.isin(have)].itertuples(index=False)]
+            _insert(c, "update games set spread_line=:s, total_line=:t, result=:r where game_id=:g", upd)
+            updated = len(upd)
+    print(f"games: {len(g)} known, {len(recs_g)} added" + (f", {updated} refreshed" if refresh else "")
+          + (f" ({skipped} skipped — teams no longer in the league)" if skipped else ""))
+
     print("\nreference tables ready — odds, picks and scores can be written now")
 
 if __name__ == "__main__":
