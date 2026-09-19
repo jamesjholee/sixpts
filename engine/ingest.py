@@ -113,4 +113,9 @@ def write(df: pd.DataFrame, table: str, replace_where: str | None = None):
                          f"apply db/schema.sql (or run db/init_local.py) first")
     with eng.begin() as c:
         if replace_where: c.execute(text(f"delete from {table} where {replace_where}"))
-        df.to_sql(table, c, if_exists="append", index=False)
+        try:
+            df.to_sql(table, c, if_exists="append", index=False)
+        except Exception as e:
+            if "foreign key" not in str(e).lower(): raise
+            raise SystemExit(f"{table}: a row references a player or game that isn't in the database yet.\n"
+                             f"Run:  python3 -m engine.seed_db\nThen retry. ({str(e)[:120]})")

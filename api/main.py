@@ -70,11 +70,20 @@ def add_odds(o: Odds, x_token: str = Header(default=""), authorization: str = He
                   {"g": o.gsis_id, "ga": o.game_id, "m": o.market, "l": o.line, "b": o.book, "p": o.price, "u": None if uid == "admin" else uid})
     return {"ok": True}
 
+def _safe(fn, fallback):
+    """A missing or not-yet-migrated table should degrade, not 500 the site."""
+    try: return fn()
+    except Exception as e:
+        import logging; logging.getLogger("uvicorn.error").warning("db read failed (%s) — returning empty", e)
+        return fallback
+
 def _odds_rows(week: int, market: str, include_private: bool):
     q = ("select gsis_id, game_id, book, price, fetched_at from odds where market=:m and game_id like :w"
          + ("" if include_private else " and source <> 'pf'") + " order by fetched_at desc")
-    with ENGINE.begin() as c:
-        return c.execute(text(q), {"m": market, "w": f"%_{week:02d}_%"}).mappings().all()
+    def run():
+        with ENGINE.begin() as c:
+            return c.execute(text(q), {"m": market, "w": f"%_{week:02d}_%"}).mappings().all()
+    return _safe(run, [])
 
 @app.get("/api/odds/{week}")
 def odds_for_week(week: int, market: str = "anytime_td", x_token: str = Header(default=""), authorization: str = Header(default="")):
@@ -201,11 +210,13 @@ def scorecards():
 @app.get("/api/record/public")
 def record_public():
     """Graded record, no auth: the 'prove it' page."""
-    with ENGINE.begin() as c:
-        rows = c.execute(text("select market, count(*) n, sum(case when result='won' then 1 else 0 end) won, sum(case when result='lost' then 1 else 0 end) lost, "
-                              "round(sum(coalesce(pnl_units,0)),2) pnl, round(avg(clv),4) clv, round(avg(p_model),3) avg_p from picks where result in ('won','lost') group by market")).mappings().all()
-        recent = c.execute(text("select player, team, opp, market, line, price_taken, p_model, closing_price, result, pnl_units, clv, game_id from picks where result is not null order by placed_at desc limit 50")).mappings().all()
-    return {"summary": [dict(r) for r in rows], "recent": [dict(r) for r in recent]}
+    def run():
+        with ENGINE.begin() as c:
+            rows = c.execute(text("select market, count(*) n, sum(case when result='won' then 1 else 0 end) won, sum(case when result='lost' then 1 else 0 end) lost, "
+                                  "round(sum(coalesce(pnl_units,0)),2) pnl, round(avg(clv),4) clv, round(avg(p_model),3) avg_p from picks where result in ('won','lost') group by market")).mappings().all()
+            recent = c.execute(text("select player, team, opp, market, line, price_taken, p_model, closing_price, result, pnl_units, clv, game_id from picks where result is not null order by placed_at desc limit 50")).mappings().all()
+        return {"summary": [dict(r) for r in rows], "recent": [dict(r) for r in recent]}
+    return _safe(run, {"summary": [], "recent": []})
 
 @app.get("/api/teams/{week}")
 def teams(week: int):
@@ -214,4 +225,22 @@ def teams(week: int):
     return json.load(open(f))
 
 @app.get("/api/health")
-def health(): return {"ok": True}
+def health():
+    """Reports what the API can actually see — the fastest way to diagnose a deploy."""
+    from sqlalchemy import inspect
+    try:
+        tables = sorted(inspect(ENGINE).get_table_names()); db_ok = True
+    except Exception as e:
+        tables, db_ok = [str(e)[:120]], False
+    need = ["odds", "picks", "scores"]
+    import re
+    weeks = sorted({int(m.group(1)) for f in DATA.glob("board_w*_public.json") if (m := re.search(r"board_w(\d+)_public", f.name))}, reverse=True)
+    counts = {}
+    if db_ok and "odds" in tables:
+        def run():
+            with ENGINE.begin() as c:
+                return {r[0]: r[1] for r in c.execute(text("select source, count(*) from odds group by 1")).all()}
+        counts = _safe(run, {})
+    return {"ok": db_ok and all(t in tables for t in need), "database": "connected" if db_ok else "error",
+            "tables_present": tables, "missing_tables": [t for t in need if t not in tables],
+            "odds_rows_by_source": counts, "boards_published": weeks, "admin_token_set": bool(TOKEN)}

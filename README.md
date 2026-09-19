@@ -12,6 +12,16 @@ docs/     data-independence.md — how each PropFinder layer gets replaced
 data/     downloads, board JSONs (gitignored)
 ```
 
+## First-time database setup
+```
+# local
+python3 db/init_local.py
+# Supabase: paste db/schema.sql into the SQL editor, then
+python3 -m engine.seed_db        # fills teams/players/games so foreign keys resolve
+```
+Postgres enforces the foreign keys SQLite ignores, so `seed_db` must run once before any odds or picks are written.
+Use the **Session pooler** connection string (`...pooler.supabase.com:5432`) — the direct `db.*.supabase.co` host is IPv6-only.
+
 ## Run locally
 ```
 python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt

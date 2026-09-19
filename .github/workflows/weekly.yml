@@ -27,6 +27,7 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           PF_COOKIE: ${{ secrets.PF_COOKIE }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
         run: |
           WEEK="${{ github.event.inputs.week }}"
           if [ -z "$WEEK" ]; then WEEK=$(python -c "import datetime as d;print(max(1,(d.date.today()-d.date(2026,9,8)).days//7+1))"); fi
@@ -36,6 +37,7 @@ jobs:
           python3 -m engine.score_week --season 2026 --week $WEEK
           python3 -m engine.team_profiles --season 2026 --week $WEEK
           echo "WEEK=$WEEK" >> $GITHUB_ENV
+          if [ -n "$ODDS_API_KEY" ]; then python3 -m engine.odds_api --week $WEEK || true; fi
           if [ -n "$PF_COOKIE" ]; then python3 -m engine.pf_odds --week $WEEK --live || true; fi
       - name: Commit public boards so the deployed API serves them
         run: |

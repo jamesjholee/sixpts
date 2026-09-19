@@ -18,5 +18,6 @@ data/teams_*.json
 !data/scorecard_w*.json
 data/upcoming_*.parquet
 data/pf_status_*.json
+data/oddsapi_raw*.json          # licensed odds — display only, never redistribute
 data/props*.json
 dist-test
