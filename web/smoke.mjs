@@ -8,7 +8,11 @@ const teams = JSON.parse(fs.readFileSync('../data/teams_w2.json'))
 globalThis.fetch = async (url, opts) => { const u = String(url); const ok = (j) => ({ ok: true, status: 200, json: async () => j })
   if (u.includes('/api/board/')) return ok(board); if (u.includes('/api/teams/')) return ok(teams); if (u.includes('/api/weeks')) return ok({ weeks: [2], latest: 2 })
   if (u.includes('/api/live/')) return ok({ week: 2, touchdowns: [{ play_id:'x', game:'DET @ BUF', scorer:'Jahmyr Gibbs', team:'DET', how:'pass', yards:11, quarter:2, clock:'5:07' }] })
-  if (u.includes('/api/evaluate')) return ok({ week: 2, priced: 0, bets: [], leans: [], passes: [] }); if (u.includes('/api/model-picks')) return ok({ priced: 0, bets: [], leans: [], passes: [] }); if (u.includes('/api/odds')) return ok({}); if (u.includes('/api/record')) return ok({ summary: [], recent: [] })
+  if (u.includes('/api/evaluate')) return ok({ week: 2, priced: 0, bets: [], leans: [], passes: [] }); if (u.includes('/api/model-picks')) return ok({ priced: 0, bets: [], leans: [], passes: [] }); if (u.includes('/api/odds')) return ok({})
+  if (u.includes('/api/scorecards')) return ok({ weeks: [1] })
+  if (u.includes('/api/scorecard/')) return ok({ week:1, n_players:306, actual_rate:.229, mean_prediction:.175, top20_hit_rate:.5,
+    calibration:[{bucket:'under 10%',n:38,predicted:.083,actual:.053},{bucket:'20–30%',n:52,predicted:.236,actual:.404}] })
+  if (u.includes('/api/record')) return ok({ summary: [], recent: [] })
   return { ok: false, status: 404, json: async () => ({}) } }
 localStorage.setItem('sixpts_21', '1')
 const React = (await import('react')).default; const { createRoot } = await import('react-dom/client'); const { act } = await import('react')
@@ -20,6 +24,15 @@ const html = document.body.innerHTML
 console.log('live panel:', html.includes('Touchdowns today'))
 console.log('rows rendered:', (html.match(/class="row/g) || []).length, '| has picks panel:', html.includes('SixPts picks'), '| has how-to:', html.includes('How to read this'))
 const real = errors.filter(e => !/act\(|not wrapped|Warning:/.test(e)); console.log('runtime errors:', real.length); real.slice(0, 3).forEach(e => console.log('  ', e.slice(0, 200)))
+// landing (no 21+ flag set)
+localStorage.removeItem('sixpts_21')
+dom.reconfigure({ url: 'http://localhost/' })
+const rootL = createRoot(document.body.appendChild(document.createElement('div')))
+await act(async () => { rootL.render(React.createElement(App)) }); await new Promise(r => setTimeout(r, 300)); await act(async () => {})
+const lh = document.body.innerHTML
+console.log('landing renders:', lh.includes('where the ball already is'), '| proof table:', lh.includes('They actually scored'))
+localStorage.setItem('sixpts_21','1')
+
 // games view
 dom.reconfigure({ url: 'http://localhost/?week=2&view=games' })
 const root2 = createRoot(document.body.appendChild(document.createElement('div')))

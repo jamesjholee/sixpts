@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { API } from './api'
 import Games from './Games'
 import Record from './Record'
+import Landing from './Landing'
 import HowTo from './HowTo'
 import { track } from './analytics'
 import { supabase, sessionToken, signIn, signOut } from './auth'
@@ -59,8 +60,11 @@ export default function App() {
   const [latest, setLatest] = useState<number | null>(null)
   useEffect(() => { if (params.get('week')) return; fetch(`${API}/api/weeks`).then(r => r.json()).then(d => { if (d.latest) setLatest(d.latest) }).catch(() => {}) }, [])
   const week = Number(params.get('week') || latest || 0)
-  const view = params.get('view') || 'board'
+  const entered = (() => { try { return localStorage.getItem('sixpts_21') === '1' } catch { return false } })()
+  const view = params.get('view') || (entered ? 'board' : 'home')
   const go = (v: string, w = week) => { const p = new URLSearchParams(location.search); p.set('view', v); p.set('week', String(w)); location.search = p.toString() }
+
+  const enter = () => { try { localStorage.setItem('sixpts_21', '1') } catch {} ; track('entered_from_landing'); go('board') }
 
   // ---- auth
   const [token, setToken] = useState(() => { try { return localStorage.getItem('sixpts_token') || '' } catch { return '' } })
@@ -170,6 +174,7 @@ export default function App() {
     </div>
     <div className="wrap">{body}</div></>)
 
+  if (view === 'home') return <Landing onEnter={enter} />
   if (err) return shell(<p className="empty">{err}</p>)
   if (!data) return shell(<p className="empty">{week ? `Loading week ${week}…` : 'Loading…'}</p>)
   if (view === 'games') return shell(<Games week={week} season={data.season} />)
