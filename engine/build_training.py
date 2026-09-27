@@ -63,11 +63,22 @@ def prev_season_rate(df, keys, cols, season_col="season"):
 def add_upcoming(pg, off, dfn, season, week, games):
     """Append empty rows for the upcoming week so expanding features include all played games."""
     g = games[(games.season == season) & (games.week == week)]
+    # anyone on the active depth chart at a skill position, even with no touches yet — the cold-start
+    # prior (snaps, then draft round) gives them a number instead of leaving them off the board entirely
+    depth = {}
+    try:
+        dc = pd.read_parquet(ingest.nflverse_file(f"depth_charts/depth_charts_{season}.parquet", force=True))
+        dc = dc[dc.pos_abb.isin(["RB", "WR", "TE", "QB", "FB"])].dropna(subset=["gsis_id"])
+        if "dt" in dc: dc = dc[dc.dt == dc.dt.max()]
+        dc["team"] = dc.team.replace({"LAR": "LA", "OAK": "LV", "SD": "LAC", "STL": "LA"})
+        depth = dc.groupby("team").gsis_id.apply(lambda s: list(dict.fromkeys(s))).to_dict()
+    except Exception as e:
+        print("depth charts unavailable, using players with usage only:", e)
     rows = []
     for _, gm in g.iterrows():
         for team in (gm.home_team, gm.away_team):
-            cands = pg[(pg.season == season) & (pg.posteam == team)].gsis_id.unique()
-            for pid in cands: rows.append(dict(season=season, week=week, game_id=gm.game_id, posteam=team, gsis_id=pid))
+            cands = list(pg[(pg.season == season) & (pg.posteam == team)].gsis_id.unique()) + depth.get(team, [])
+            for pid in dict.fromkeys(cands): rows.append(dict(season=season, week=week, game_id=gm.game_id, posteam=team, gsis_id=pid))
     up = pd.DataFrame(rows).drop_duplicates(["season", "week", "game_id", "posteam", "gsis_id"])
     # a replayed week already has real rows — keep those, add placeholders only for players without one
     have = set(map(tuple, pg.loc[(pg.season == season) & (pg.week == week), ["game_id", "gsis_id"]].itertuples(index=False, name=None)))
@@ -169,6 +180,11 @@ def main(upcoming=None):
     inj["team"] = inj.team.replace({"LAR": "LA", "OAK": "LV", "SD": "LAC", "STL": "LA"})
     out_ids = inj[inj.report_status.isin(["Out", "Doubtful"])]
     q_ids = inj[inj.report_status.eq("Questionable")][["season", "week", "gsis_id"]].assign(questionable=1)
+    prac_src = pd.concat([pd.read_parquet(f"{D}/injuries_{s}.parquet") for s in SEASONS if pathlib.Path(f"{D}/injuries_{s}.parquet").exists()])
+    if "practice_status" in prac_src:
+        prac = (prac_src[["season", "week", "gsis_id", "practice_status"]].dropna(subset=["gsis_id"])
+                .drop_duplicates(["season", "week", "gsis_id"], keep="last").rename(columns={"practice_status": "practice"}))
+        pg = pg.merge(prac, on=["season", "week", "gsis_id"], how="left")
     pg = pg.merge(q_ids, on=["season", "week", "gsis_id"], how="left").fillna({"questionable": 0})
     # what each player was worth BEFORE this week (share known as of this week): std if available else prev-season
     pg["share_pass_asof"] = pg.rz_tgt_share_std.fillna(pg.rz_tgt_share_prev).fillna(0)

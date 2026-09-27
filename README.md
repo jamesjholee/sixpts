@@ -64,6 +64,10 @@ Render redeploys automatically. The private board, odds and picks live in the da
 3. Tuesday: `python3 -m engine.grade --season 2026 --week N` -> won/lost, units, CLV. `GET /api/record` for the running record.
 Judge on CLV over 60+ picks, not on any single week.
 
+## Parlay check
+`POST /api/parlay {week, legs:[{gsis_id, game_id, price}]}` — joint probability by simulation, correlation-aware.
+Surfaced in the picks tray once two or more picks are logged.
+
 ## Model picks
 `GET /api/model-picks/{week}` — the model chooses, with reasons, among players that have a stored price: value (edge vs the book's implied probability, EV per unit, quarter-Kelly stake) AND signal agreement (real scoring role, defense leaks, environment, available, role not falling, not a streak, certainty). Tiers: **Bet** (5+ pts edge, all-but-one signals green, high certainty), **Lean** (edge, mixed signals), **Pass** (says exactly why, e.g. "would need -120 or better"). Nothing shorter than -250 or longer than +600 can be a Bet.
 

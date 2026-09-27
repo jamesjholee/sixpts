@@ -134,7 +134,7 @@ export default function App() {
     { k: 'rz_carry_pg', label: 'RZ carries' }, { k: 'i5_carry_pg', label: 'Goal-line carries' }, { k: 'def_rz_td_pct', label: 'Opp RZ TD%' }, { k: 'implied', label: 'Implied' },
     { k: 'c_defense', label: 'Def Δ' }, { k: 'certainty', label: 'Certainty' }, { k: 'range', label: 'Range' }, { k: 'hit_l5', label: 'L5' }, { k: 'flags', label: 'Notes' }, { k: 'pick', label: 'Pick', locked: true }]
   const [hidden, setHidden] = useState<Set<string>>(() => { try { return new Set(JSON.parse(localStorage.getItem('sixpts_hidden_cols') || '[]')) } catch { return new Set() } })
-  const [colsOpen, setColsOpen] = useState(false)
+  const [colsOpen, setColsOpen] = useState(false); const [settings, setSettings] = useState(false)
   const toggleCol = (k: string) => setHidden(h => { const n = new Set(h); n.has(k) ? n.delete(k) : n.add(k); try { localStorage.setItem('sixpts_hidden_cols', JSON.stringify([...n])) } catch {} ; return n })
   const SIMPLE = new Set(['player', 'team', 'p_model', 'book', 'edge', 'certainty', 'flags', 'pick'])
   const show = (k: string) => density === 'simple' ? SIMPLE.has(k) : !hidden.has(k)
@@ -169,6 +169,13 @@ export default function App() {
   const matchTag = (r: Row) => { const d = r.c_defense ?? 0; return d >= .02 ? ['fav', 'Favorable'] : d <= -.02 ? ['unfav', 'Tough'] : ['', 'Neutral'] }
 
   const picks = data ? data.board.filter(r => store[rid(r)]?.picked) : []
+  const [parlay, setParlay] = useState<any>(null); const [showParlay, setShowParlay] = useState(false)
+  useEffect(() => {
+    if (picks.length < 2) { setParlay(null); return }
+    const legs = picks.map(r => ({ gsis_id: r.gsis_id, game_id: r.game_id, price: Number(store[rid(r)]?.odds) || undefined }))
+    fetch(`${API}/api/parlay`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ week, legs }) })
+      .then(r => r.ok ? r.json() : null).then(setParlay).catch(() => setParlay(null))
+  }, [picks.length, JSON.stringify(picks.map(r => [rid(r), store[rid(r)]?.odds])), week])
   const copyPicks = () => { const head = 'week,game,team,opp,player,position,p_model,fair_odds,book,book_odds,implied,edge,picked_at\n'
     const body = picks.map(r => { const s = store[rid(r)]; const pr = priceFor(r, s); const ip = pr ? implied(pr.price) : null; return [week, r.game_id, r.team, r.opp, r.player, r.position, r.p_model.toFixed(3), fmtOdds(r.fair_odds), pr?.book || '', pr?.price || '', ip == null ? '' : ip.toFixed(3), ip == null ? '' : (r.p_model - ip).toFixed(3), s.pickedAt || ''].join(',') }).join('\n')
     navigator.clipboard?.writeText(head + body).catch(() => prompt('Copy:', head + body)) }
@@ -180,13 +187,33 @@ export default function App() {
     <div className="top">
       <a className="wordmark" onClick={() => go('home')} title="About SixPts" role="link" tabIndex={0}
          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') go('home') }}><i />SixPts</a>
-      <nav className="nav">{[['board', 'Board'], ['games', 'Games'], ['record', 'Record']].map(([v, l]) => <a key={v} className={view === v ? 'on' : ''} onClick={() => go(v)}>{l}</a>)}</nav>
+      <nav className="nav desk">{[['board', 'Board'], ['games', 'Games'], ['record', 'Record']].map(([v, l]) => <a key={v} className={view === v ? 'on' : ''} onClick={() => go(v)}>{l}</a>)}</nav>
       <div className="right">
-        <div className="week"><button onClick={() => go(view, Math.max(1, week - 1))}>‹</button><span>Week {week}</span><button onClick={() => go(view, week + 1)}>›</button></div>
-        {supabase ? (session ? <button className="btn" onClick={() => signOut()}>Sign out</button> : <><input className="keyfield" type="email" placeholder="email" value={email} onChange={e => setEmail(e.target.value)} /><button className="btn" onClick={() => { if (email) { signIn(email); alert('Check your email for the sign-in link.') } }}>Sign in</button></>) : null}
-        <input className="keyfield" type="password" placeholder="admin key" value={token} onChange={e => { setToken(e.target.value); try { localStorage.setItem('sixpts_token', e.target.value) } catch {} }} />
+        <div className="week"><button aria-label="Previous week" onClick={() => go(view, Math.max(1, week - 1))}>‹</button><span>Wk {week}</span><button aria-label="Next week" onClick={() => go(view, week + 1)}>›</button></div>
+        <div className="settings-wrap">
+          <button className={'icon' + (canSave ? ' live' : '')} aria-label="Settings" title={canSave ? 'Signed in — picks save to the server' : 'Settings'} onClick={() => setSettings(s => !s)}>⚙</button>
+          {settings && <div className="popover" role="dialog" aria-label="Settings">
+            <h3>Saving your picks</h3>
+            <p className="muted" style={{ margin: '0 0 10px', fontSize: 13 }}>
+              {canSave ? 'Picks and prices save to the server and appear on the Record page once graded.'
+                       : 'Without this, picks stay in this browser only and never reach the Record page.'}
+            </p>
+            {supabase && (session
+              ? <button className="btn" onClick={() => signOut()}>Sign out</button>
+              : <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+                  <input className="keyfield" type="email" placeholder="email" value={email} onChange={e => setEmail(e.target.value)} />
+                  <button className="btn" onClick={() => { if (email) { signIn(email); alert('Check your email for the sign-in link.') } }}>Sign in</button>
+                </div>)}
+            <label className="muted" style={{ display: 'block', fontSize: 12, marginTop: 8 }}>Admin key
+              <input className="keyfield" type="password" placeholder="optional" value={token}
+                     onChange={e => { setToken(e.target.value); try { localStorage.setItem('sixpts_token', e.target.value) } catch {} }} />
+            </label>
+            <button className="btn" style={{ marginTop: 10 }} onClick={() => setSettings(false)}>Done</button>
+          </div>}
+        </div>
       </div>
     </div>
+    <nav className="tabs">{[['board', 'Board'], ['games', 'Games'], ['record', 'Record']].map(([v, l]) => <a key={v} className={view === v ? 'on' : ''} onClick={() => go(v)}>{l}</a>)}</nav>
     <div className="wrap">{body}</div></>)
 
   if (view === 'home') return <Landing onEnter={enter} entered={entered} />
@@ -237,14 +264,15 @@ export default function App() {
       <div className="seg"><button className={market === 'td' ? 'on' : ''} onClick={() => setMarket('td')}>Anytime TD</button><button className={market === 'rec' ? 'on' : ''} onClick={() => setMarket('rec')}>Receptions</button></div>
       <div className="seg">{['', 'RB', 'WR', 'TE', 'QB'].map(p => <button key={p} className={pos === p ? 'on' : ''} onClick={() => setPos(p)}>{p || 'All'}</button>)}</div>
       <div className="seg"><button className={density === 'simple' ? 'on' : ''} onClick={() => setDens('simple')}>Simple</button><button className={density === 'full' ? 'on' : ''} onClick={() => setDens('full')}>Full</button></div>
+      <input type="search" className="search" placeholder="Search player or team" value={q} onChange={e => setQ(e.target.value)} />
       <button className={'btn' + (activeFilters ? ' on' : '')} onClick={() => setMore(o => !o)}>Filters{activeFilters ? ` · ${activeFilters}` : ''}</button>
-      <span className="muted" style={{ marginLeft: 'auto' }}>{rows.length} players{nBook ? ` · ${nBook} priced` : ''}</span>
+      <span className="muted" style={{ marginLeft: 'auto' }} title="Players below the minimum probability are hidden, not missing — search finds them.">
+        {rows.length} of {data.board.length} shown{nBook ? ` · ${nBook} priced` : ''}</span>
     </div>
     {more && <div className="bar sub">
       <label>Min P(TD) <input type="number" value={minp} min={0} max={100} step={5} onChange={e => setMinp(Number(e.target.value) || 0)} />%</label>
       <label><input type="checkbox" checked={onlyEdge} onChange={e => setOnlyEdge(e.target.checked)} /> edge ≥ 3 only</label>
       <label><input type="checkbox" checked={onlyPicks} onChange={e => setOnlyPicks(e.target.checked)} /> my picks only</label>
-      <input type="search" placeholder="Search player or team" value={q} onChange={e => setQ(e.target.value)} />
       {density === 'full' && <div style={{ position: 'relative' }}><button className="btn" onClick={() => setColsOpen(o => !o)}>Columns{hidden.size ? ` · ${hidden.size} hidden` : ''}</button>
         {colsOpen && <div className="colmenu">{COLS.map(c => <label key={c.k} className={c.locked ? 'muted' : ''}><input type="checkbox" checked={!hidden.has(c.k)} disabled={c.locked} onChange={() => toggleCol(c.k)} /> {c.label}</label>)}<button className="btn" onClick={() => { setHidden(new Set()); try { localStorage.removeItem('sixpts_hidden_cols') } catch {} }}>Show all</button></div>}</div>}
     </div>}
@@ -302,8 +330,32 @@ export default function App() {
     <div className="tray">
       <h2>Picks <span className="muted">{picks.length ? picks.length + ' logged' : 'none'}</span></h2>
       <div className="list">{picks.length === 0 ? <span className="muted">Pick from any row. Saved to the server when signed in; otherwise this browser only.</span> : picks.map(r => { const s = store[rid(r)]; const pr = priceFor(r, s); const ip = pr ? implied(pr.price) : null; return <span key={rid(r)} className="item">{r.player} · {pct(r.p_model)}{pr ? ` @ ${fmtOdds(pr.price)}` : ''}{ip != null ? ` · ${pts(r.p_model - ip)}` : ''}</span> })}</div>
+      {parlay && <button className={'btn' + (showParlay ? ' on' : '')} onClick={() => setShowParlay(s => !s)}>
+        Parlay {parlay.book_odds >= 0 ? '+' : ''}{parlay.book_odds} · {Math.round(parlay.joint_correlated * 100)}%</button>}
       <button className="btn" onClick={copyPicks}>Copy CSV</button>
       <button className="btn" onClick={() => { if (confirm('Clear all picks and prices for this week?')) setStore({}) }}>Clear</button>
+      {parlay && showParlay && <div className="parlay">
+        <div className="parlay-grid">
+          <div><h3>If you parlayed all {parlay.legs}</h3>
+            <Stat label="Book pays" v={`${parlay.book_odds >= 0 ? '+' : ''}${parlay.book_odds}`} />
+            <Stat label="Book's implied chance" v={pct(parlay.book_implied)} />
+            <Stat label="Our chance" v={pct(parlay.joint_correlated)} />
+            <Stat label="Fair price" v={`${(parlay.fair_odds_correlated ?? 0) >= 0 ? '+' : ''}${parlay.fair_odds_correlated}`} />
+          </div>
+          <div><h3>Why it isn't just multiplication</h3>
+            <Stat label="Multiplying the legs" v={pct(parlay.joint_independent)} />
+            <Stat label="Adjusting for correlation" v={pct(parlay.joint_correlated)} />
+            <Stat label="Difference" v={`${parlay.correlation_effect >= 0 ? '+' : ''}${(parlay.correlation_effect * 100).toFixed(1)} pts`} />
+            <Stat label="Shape" v={parlay.shape} />
+          </div>
+          <div><h3>Verdict</h3>
+            <Stat label="Edge vs the book" v={`${parlay.edge >= 0 ? '+' : ''}${(parlay.edge * 100).toFixed(1)} pts`} />
+            <Stat label="Expected value" v={`${parlay.ev_per_unit >= 0 ? '+' : ''}${parlay.ev_per_unit.toFixed(3)} per unit`} />
+            <Stat label="Vig lost to stacking" v={`${((parlay.vig_compounded ?? 0) * 100).toFixed(1)} pts`} />
+          </div>
+        </div>
+        <p className="muted" style={{ margin: '8px 0 0', fontSize: 12, maxWidth: '78ch' }}>{parlay.note}</p>
+      </div>}
     </div>
   </>)
 

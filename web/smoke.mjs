@@ -24,6 +24,16 @@ const html = document.body.innerHTML
 console.log('live panel:', html.includes('Touchdowns today'))
 console.log('rows rendered:', (html.match(/class="row/g) || []).length, '| has picks panel:', html.includes('SixPts picks'), '| has how-to:', html.includes('How to read this'))
 const real = errors.filter(e => !/act\(|not wrapped|Warning:/.test(e)); console.log('runtime errors:', real.length); real.slice(0, 3).forEach(e => console.log('  ', e.slice(0, 200)))
+// header audit at phone width
+{
+  const top = document.querySelector('.top')
+  const kids = top ? [...top.querySelectorAll(':scope > *')].map(e => e.className || e.tagName) : []
+  console.log('header children:', kids.join(' | '))
+  console.log('admin key in header:', !!top?.querySelector('.keyfield'))
+  console.log('bottom tab bar present:', !!document.querySelector('.tabs'), '| tabs:', document.querySelectorAll('.tabs a').length)
+  console.log('settings button:', !!document.querySelector('.icon'))
+}
+
 // landing (no 21+ flag set)
 localStorage.removeItem('sixpts_21')
 dom.reconfigure({ url: 'http://localhost/' })

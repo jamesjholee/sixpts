@@ -57,6 +57,9 @@ def main(season, week):
         if r.get("offense_pct_trend", 0) <= -0.15: f.append("snaps falling")
         if r.get("abs_n", 0) > 0: f.append(f"{int(r.abs_n)} teammate(s) out at position" + (f" (+{r.abs_same_grp:.0%} of RZ work open)" if r.abs_same_grp > 0.05 else ""))
         if r.get("questionable", 0) == 1: f.append("QUESTIONABLE on injury report")
+        prac = str(r.get("practice", "") or "")
+        if "Did Not" in prac: f.append("did not practice this week")
+        elif "Limited" in prac: f.append("limited in practice")
         if r.get("new_team", 0) == 1: f.append("new team — last season weighted less")
         if r.get("indoor", 0) == 0 and pd.notna(r.get("wind")) and r.wind >= 15: f.append(f"wind {r.wind:.0f} mph — passing TDs suppressed")
         if r.get("indoor", 0) == 0 and pd.notna(r.get("temp")) and r.temp <= 32: f.append(f"cold {r.temp:.0f}°F")
@@ -105,7 +108,7 @@ def main(season, week):
             "xtd_l2": "xtd_recent", "i5_carry_l2": "i5_carry_recent", "rz_tgt_share_shr": "rz_tgt_share", "rz_car_share_shr": "rz_carry_share", "abs_same_grp": "rz_share_open",
             "off_rz_pass_rate_trail": "off_rz_pass_rate_trailing", "off_rz_pass_rate_lead": "off_rz_pass_rate_leading",
             "exp_targets": "exp_targets", "exp_rec": "exp_rec", "rec_sd": "rec_sd", "indoor": "indoor", "wind": "wind", "temp": "temp",
-            "hit_l5": "hit_l5", "n_l5": "n_l5", "xtd_l5": "xtd_l5", "verdict": "verdict", "touches_to_date": "touches_recent"}
+            "practice": "practice", "hit_l5": "hit_l5", "n_l5": "n_l5", "xtd_l5": "xtd_l5", "verdict": "verdict", "touches_to_date": "touches_recent"}
     out = up[list(keep)].rename(columns=keep).sort_values("p_model", ascending=False).round(3)
     out["new_team"] = out.new_team.astype(bool)
     out = out.astype(object).where(pd.notna(out), None)

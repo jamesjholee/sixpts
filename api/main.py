@@ -57,6 +57,7 @@ def private_board(week: int, x_token: str = Header(default="")):
 
 import sys; sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from engine.select_picks import evaluate, rank
+from engine.parlay import evaluate as parlay_eval
 
 class Odds(BaseModel):
     gsis_id: str; game_id: str; market: str = "anytime_td"; book: str = "book"; price: int; line: Optional[float] = None
@@ -97,6 +98,27 @@ def odds_for_week(week: int, market: str = "anytime_td", x_token: str = Header(d
         k = f"{r['gsis_id']}|{r['game_id']}"
         out.setdefault(k, {})
         if r["book"] not in out[k]: out[k][r["book"]] = r["price"]
+    return out
+
+class ParlayReq(BaseModel):
+    week: int
+    legs: list           # [{gsis_id, game_id, price}] — prices optional
+
+@app.post("/api/parlay")
+def parlay(body: ParlayReq):
+    """Joint probability for a set of legs, accounting for the fact that same-game legs move together."""
+    board = {f"{r['gsis_id']}|{r['game_id']}": r for r in _load(body.week, public=True)["board"]}
+    legs = []
+    for l in body.legs:
+        r = board.get(f"{l.get('gsis_id')}|{l.get('game_id')}")
+        if not r: continue
+        legs.append(dict(player=r["player"], team=r["team"], game_id=r["game_id"], p_model=r["p_model"],
+                         price=int(l["price"]) if l.get("price") else None))
+    if not legs: raise HTTPException(400, "no legs matched this week's board")
+    if not all(l["price"] for l in legs):
+        for l in legs: l["price"] = l["price"] or int(round(-100 * l["p_model"] / (1 - l["p_model"]) if l["p_model"] >= .5 else 100 * (1 - l["p_model"]) / l["p_model"]))
+    out = parlay_eval(legs)
+    out["legs_detail"] = [dict(player=l["player"], team=l["team"], p_model=round(l["p_model"], 3), price=l["price"]) for l in legs]
     return out
 
 @app.get("/api/model-picks/{week}")
