@@ -152,7 +152,10 @@ export default function App() {
         if (market === 'rec') { const line = Number(s.recLine); const pm = (line && r.exp_rec != null) ? pOver(r.exp_rec, r.rec_sd || 2, line) : null
           return { ...r, p_model: pm ?? r.p_model, fair_odds: pm ? amer(pm) : r.fair_odds, price: pr, recLine: s.recLine || '', edge: (pm != null && ip != null) ? pm - ip : null, picked: !!s.picked } }
         return { ...r, price: pr, recLine: s.recLine || '', edge: ip == null ? null : r.p_model - ip, picked: !!s.picked } })
-      .filter(r => (!pos || r.position === pos) && (!game || r.game_id === game) && r.p_model * 100 >= minp && (!onlyEdge || (r.edge != null && r.edge >= .03)) && (!onlyPicks || r.picked) && (!q || `${r.player} ${r.team} ${r.opp}`.toLowerCase().includes(q.toLowerCase())))
+      // a search names a specific player, so it overrides the probability floor — otherwise searching
+      // a longshot returns nothing and the page reads as "he isn't on our board"
+      .filter(r => { const hit = !q || `${r.player} ${r.team} ${r.opp}`.toLowerCase().includes(q.toLowerCase())
+        return hit && (!pos || r.position === pos) && (!game || r.game_id === game) && (q ? true : r.p_model * 100 >= minp) && (!onlyEdge || (r.edge != null && r.edge >= .03)) && (!onlyPicks || r.picked) })
       .sort((a: any, b: any) => { if (sort.k === 'edge') { const ax = a.edge == null, bx = b.edge == null; if (ax && bx) return b.p_model - a.p_model; if (ax) return 1; if (bx) return -1; return (b.edge - a.edge) * (sort.dir === -1 ? 1 : -1) } let x = a[sort.k], y = b[sort.k]; if (x == null) x = -1e9; if (y == null) y = -1e9; return typeof x === 'string' ? x.localeCompare(y) * sort.dir : (x - y) * sort.dir })
   }, [data, store, books, pos, game, minp, onlyEdge, onlyPicks, q, sort, market])
 
@@ -266,8 +269,8 @@ export default function App() {
       <div className="seg"><button className={density === 'simple' ? 'on' : ''} onClick={() => setDens('simple')}>Simple</button><button className={density === 'full' ? 'on' : ''} onClick={() => setDens('full')}>Full</button></div>
       <input type="search" className="search" placeholder="Search player or team" value={q} onChange={e => setQ(e.target.value)} />
       <button className={'btn' + (activeFilters ? ' on' : '')} onClick={() => setMore(o => !o)}>Filters{activeFilters ? ` · ${activeFilters}` : ''}</button>
-      <span className="muted" style={{ marginLeft: 'auto' }} title="Players below the minimum probability are hidden, not missing — search finds them.">
-        {rows.length} of {data.board.length} shown{nBook ? ` · ${nBook} priced` : ''}</span>
+      <span className="muted" style={{ marginLeft: 'auto' }} title="Players below the minimum probability are hidden, not missing — searching a name ignores the probability filter and shows them.">
+        {rows.length} of {data.board.length} shown{q ? ' · search ignores Min P(TD)' : ''}{nBook ? ` · ${nBook} priced` : ''}</span>
     </div>
     {more && <div className="bar sub">
       <label>Min P(TD) <input type="number" value={minp} min={0} max={100} step={5} onChange={e => setMinp(Number(e.target.value) || 0)} />%</label>

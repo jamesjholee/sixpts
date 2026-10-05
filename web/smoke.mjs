@@ -34,6 +34,21 @@ const real = errors.filter(e => !/act\(|not wrapped|Warning:/.test(e)); console.
   console.log('settings button:', !!document.querySelector('.icon'))
 }
 
+// searching a name must ignore the Min P(TD) floor — a longshot returned zero rows and read
+// as "not on our board", which is exactly wrong for fringe players
+{
+  const low = [...board.board].sort((a, b) => a.p_model - b.p_model)[0]
+  const input = document.querySelector('input.search')
+  const set = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set
+  await act(async () => { set.call(input, low.player); input.dispatchEvent(new dom.window.Event('input', { bubbles: true })) })
+  await new Promise(r => setTimeout(r, 50)); await act(async () => {})
+  // the search box's own value shows up in innerHTML, so assert on rendered rows, not on the name
+  const found = [...document.querySelectorAll('tbody tr, .card')].some(e => (e.textContent || '').includes(low.player))
+  console.log(`search below floor: "${low.player}" at ${(low.p_model * 100).toFixed(1)}% ->`, found ? 'FOUND' : 'MISSING')
+  if (!found) real.push(`search did not surface ${low.player} (${(low.p_model * 100).toFixed(1)}%) below the Min P(TD) floor`)
+  await act(async () => { set.call(input, ''); input.dispatchEvent(new dom.window.Event('input', { bubbles: true })) })
+}
+
 // landing (no 21+ flag set)
 localStorage.removeItem('sixpts_21')
 dom.reconfigure({ url: 'http://localhost/' })

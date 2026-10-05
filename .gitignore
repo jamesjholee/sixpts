@@ -18,6 +18,9 @@ data/teams_*.json
 !data/scorecard_w*.json
 data/upcoming_*.parquet
 data/pf_status_*.json
-data/oddsapi_raw*.json          # licensed odds — display only, never redistribute
+# licensed odds — display only, never redistribute.
+# (gitignore has no trailing comments: a '#' only starts a comment at column 1,
+#  so keeping this note on the pattern line silently disabled the rule.)
+data/oddsapi_raw*.json
 data/props*.json
 dist-test
