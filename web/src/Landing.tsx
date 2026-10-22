@@ -46,7 +46,7 @@ export default function Landing({ onEnter, entered = false }: { onEnter: () => v
             {RUSH.map((r, i) => (
               <div className="lp-bar" key={r.yard}>
                 <span className="lp-val">{pct(r.p)}</span>
-                <i style={{ height: drawn ? `${r.p * 150}px` : 0, transitionDelay: `${i * 90}ms` }} />
+                <i style={{ height: `${r.p * 150}px`, transform: drawn ? 'scaleY(1)' : 'scaleY(0)', transitionDelay: `${i * 90}ms` }} />
                 <span className="lp-yard">{r.yard}</span>
               </div>
             ))}

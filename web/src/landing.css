@@ -36,8 +36,8 @@
 .lp-bars{display:flex; align-items:flex-end; gap:clamp(10px,3.4vw,44px); height:210px; border-bottom:2px solid var(--paint); padding-bottom:0}
 .lp-bar{display:flex; flex-direction:column; justify-content:flex-end; align-items:center; position:relative}
 .lp-bar i{
-  display:block; width:clamp(34px,7vw,74px); background:var(--bulb); height:0;
-  transition:height .7s cubic-bezier(.2,.8,.25,1);
+  display:block; width:clamp(34px,7vw,74px); background:var(--bulb); transform:scaleY(0); transform-origin:bottom;
+  transition:transform .7s cubic-bezier(.2,.8,.25,1);
 }
 .lp-val{font-size:clamp(15px,2.2vw,22px); margin-bottom:8px; color:var(--paint)}
 .lp-yard{position:absolute; bottom:-28px; font-size:13px; color:var(--dim); font-variant-numeric:tabular-nums}

@@ -26,7 +26,7 @@ export default function Games({ week, season }: { week: number; season: number }
   useEffect(() => { const f = () => setIsMobile(window.innerWidth < 720); window.addEventListener('resize', f); return () => window.removeEventListener('resize', f) }, [])
   useEffect(() => { fetch(`${API}/api/teams/${week}`).then(r => { if (!r.ok) throw new Error(`No team profiles for week ${week}`); return r.json() }).then(setData).catch(e => setErr(e.message)) }, [week])
   if (err) return <p className="empty">{err}</p>
-  if (!data) return <p className="empty">Loading…</p>
+  if (!data) return <div className="sk-rows" aria-busy="true" aria-label="Loading team profiles">{Array.from({ length: 5 }).map((_, i) => <div className="sk-row" key={i}><div className="skeleton" style={{ width: '55%' }} /><div className="skeleton" style={{ width: '70%' }} /><div className="skeleton" /><div className="skeleton" /><div className="skeleton" style={{ width: '80%' }} /></div>)}</div>
 
   // build matchups from each team's `next`
   const seen = new Set<string>(); const games: { id: string; away: string; home: string; total: number; spread: number }[] = []
@@ -73,7 +73,7 @@ export default function Games({ week, season }: { week: number; season: number }
   }
 
   return (<div>
-    <div className="games">{games.map(x => <div key={x.id} className={'game' + (g.id === x.id ? ' on' : '')} onClick={() => { setSel(x.id); setSide(0) }}><b>{x.away} @ {x.home}</b><small>O/U {x.total} · {x.spread > 0 ? `${x.home} −${x.spread}` : x.spread < 0 ? `${x.away} −${-x.spread}` : 'pick'}</small></div>)}</div>
+    <div className="games">{games.map(x => <button key={x.id} className={'game' + (g.id === x.id ? ' on' : '')} aria-pressed={g.id === x.id} onClick={() => { setSel(x.id); setSide(0) }}><b>{x.away} @ {x.home}</b><small>O/U {x.total} · {x.spread > 0 ? `${x.home} −${x.spread}` : x.spread < 0 ? `${x.away} −${-x.spread}` : 'pick'}</small></button>)}</div>
     <div className="bar"><h1>{g.away} @ {g.home}</h1><span className="muted">O/U {g.total} · {spreadText}</span>
       {isMobile && <div className="seg" style={{ marginLeft: 'auto' }}>{teams.map((tm, i) => <button key={tm} className={side === i ? 'on' : ''} onClick={() => setSide(i as 0 | 1)}>{tm}</button>)}</div>}</div>
     {isMobile ? card(teams[side]) : <div className="two">{card(g.away)}{card(g.home)}</div>}

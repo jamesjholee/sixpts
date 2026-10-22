@@ -58,7 +58,14 @@ const Stat = ({ k, v, label }: { k?: string; v: string; label?: string }) => <di
 export default function App() {
   const params = new URLSearchParams(location.search)
   const [latest, setLatest] = useState<number | null>(null)
+  const [waking, setWaking] = useState(false)
   useEffect(() => { if (params.get('week')) return; fetch(`${API}/api/weeks`).then(r => r.json()).then(d => { if (d.latest) setLatest(d.latest) }).catch(() => {}) }, [])
+  // the API sleeps between visits on the free tier; after 6s of silence say so instead of looping a skeleton
+  useEffect(() => { const t = setTimeout(() => setWaking(true), 6000); return () => clearTimeout(t) }, [])
+  // ---- toasts replace browser dialogs
+  const [toast, setToast] = useState<{ msg: string; warn?: boolean } | null>(null)
+  const say = (msg: string, warn = false) => { setToast({ msg, warn }); setTimeout(() => setToast(t => t?.msg === msg ? null : t), 2600) }
+  const [confirmClear, setConfirmClear] = useState(false)
   const week = Number(params.get('week') || latest || 0)
   const entered = (() => { try { return localStorage.getItem('sixpts_21') === '1' } catch { return false } })()
   const view = params.get('view') || (entered ? 'board' : 'home')
@@ -80,7 +87,7 @@ export default function App() {
   useEffect(() => {
     if (!week) return
     const url = token ? `${API}/api/private/board/${week}` : `${API}/api/board/${week}`
-    fetch(url, { headers: token ? { 'X-Token': token } : {} }).then(async r => { if (!r.ok) { if (r.status === 401) throw new Error('Admin key rejected'); const j = await r.json().catch(() => ({})); const d = j.detail || {}; throw new Error(d.latest ? `Week ${week} isn't published yet. Latest is Week ${d.latest}.` : `Week ${week} isn't published yet.`) } return r.json() }).then(d => { setData(d); track('board_view', { week }) }).catch(e => setErr(e.message))
+    fetch(url, { headers: token ? { 'X-Token': token } : {} }).then(async r => { if (!r.ok) { if (r.status === 401) throw new Error('Admin key rejected'); const j = await r.json().catch(() => ({})); const d = j.detail || {}; throw new Error(d.latest ? `Week ${week} isn't published yet. Latest is Week ${d.latest}.` : `Week ${week} isn't published yet.`) } return r.json() }).then(d => { setData(d); setWaking(false); track('board_view', { week }) }).catch(e => setErr(e.message))
   }, [week, token])
   useEffect(() => { if (!week) return; const pull = () => fetch(`${API}/api/live/${week}`).then(r => r.ok ? r.json() : null).then(d => { if (!d) return
       setLive(prev => { const seen = new Set(prev.map((t: any) => t.play_id))
@@ -146,6 +153,8 @@ export default function App() {
   const bestBook = (r: Row) => { const b = realBooks(r) || books[rid(r)]; if (!b) return null; let best: [string, number] | null = null; for (const [k, v] of Object.entries(b)) if (!best || v > best[1]) best = [k, v]; return best }
   const priceFor = (r: Row, s: Store[string]) => { if (s?.odds) return { price: Number(s.odds), book: s.book || 'manual' }; const b = bestBook(r); return b ? { price: b[1], book: b[0] } : null }
 
+  const CERT_W: Record<string, number> = { high: 1, medium: .7, low: .4 }
+  const wEdge = (r: any) => r.edge * (CERT_W[r.certainty_label] ?? .7)
   const rows = useMemo(() => {
     if (!data) return []
     return data.board.map(r => { const s = store[rid(r)] || {}; const pr = priceFor(r, s); const ip = pr ? implied(pr.price) : null
@@ -156,13 +165,15 @@ export default function App() {
       // a longshot returns nothing and the page reads as "he isn't on our board"
       .filter(r => { const hit = !q || `${r.player} ${r.team} ${r.opp}`.toLowerCase().includes(q.toLowerCase())
         return hit && (!pos || r.position === pos) && (!game || r.game_id === game) && (q ? true : r.p_model * 100 >= minp) && (!onlyEdge || (r.edge != null && r.edge >= .03)) && (!onlyPicks || r.picked) })
-      .sort((a: any, b: any) => { if (sort.k === 'edge') { const ax = a.edge == null, bx = b.edge == null; if (ax && bx) return b.p_model - a.p_model; if (ax) return 1; if (bx) return -1; return (b.edge - a.edge) * (sort.dir === -1 ? 1 : -1) } let x = a[sort.k], y = b[sort.k]; if (x == null) x = -1e9; if (y == null) y = -1e9; return typeof x === 'string' ? x.localeCompare(y) * sort.dir : (x - y) * sort.dir })
+      // edge is weighted by certainty for ordering only (the number shown is untouched): a +17 on a committee
+      // back with two games of data should not outrank a +9 on a locked-in starter
+      .sort((a: any, b: any) => { if (sort.k === 'edge') { const ax = a.edge == null, bx = b.edge == null; if (ax && bx) return b.p_model - a.p_model; if (ax) return 1; if (bx) return -1; return (wEdge(b) - wEdge(a)) * (sort.dir === -1 ? 1 : -1) } let x = a[sort.k], y = b[sort.k]; if (x == null) x = -1e9; if (y == null) y = -1e9; return typeof x === 'string' ? x.localeCompare(y) * sort.dir : (x - y) * sort.dir })
   }, [data, store, books, pos, game, minp, onlyEdge, onlyPicks, q, sort, market])
 
   const logPick = (r: any, s: Store[string]) => {
     const now = !s?.picked; const pr = priceFor(r, s || {})
     setStore(st => ({ ...st, [rid(r)]: { ...st[rid(r)], picked: now, pickedAt: new Date().toISOString() } }))
-    if (now && !pr) { alert('No price yet — type the book price first.'); return }
+    if (now && !pr) { say('Type the book price first, then pick.', true); return }
     if (now) track('pick_logged', { week, market })
     if (now && canSave && pr) fetch(`${API}/api/picks`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ gsis_id: r.gsis_id, game_id: r.game_id, market: market === 'rec' ? 'receptions' : 'anytime_td', player: r.player, team: r.team, opp: r.opp, line: market === 'rec' ? Number(s?.recLine) || null : null, book: pr.book, price_taken: pr.price, p_model: r.p_model }) }).catch(() => {})
   }
@@ -181,7 +192,7 @@ export default function App() {
   }, [picks.length, JSON.stringify(picks.map(r => [rid(r), store[rid(r)]?.odds])), week])
   const copyPicks = () => { const head = 'week,game,team,opp,player,position,p_model,fair_odds,book,book_odds,implied,edge,picked_at\n'
     const body = picks.map(r => { const s = store[rid(r)]; const pr = priceFor(r, s); const ip = pr ? implied(pr.price) : null; return [week, r.game_id, r.team, r.opp, r.player, r.position, r.p_model.toFixed(3), fmtOdds(r.fair_odds), pr?.book || '', pr?.price || '', ip == null ? '' : ip.toFixed(3), ip == null ? '' : (r.p_model - ip).toFixed(3), s.pickedAt || ''].join(',') }).join('\n')
-    navigator.clipboard?.writeText(head + body).catch(() => prompt('Copy:', head + body)) }
+    navigator.clipboard?.writeText(head + body).then(() => say(`Copied ${picks.length} pick${picks.length === 1 ? '' : 's'} as CSV`)).catch(() => say('Clipboard blocked. Sign in to save picks instead.', true)) }
 
   const th = (k: string, left = false) => <th className={(left ? 'l ' : '') + (sort.k === k ? 'sorted' : '')} title={DEF[k]?.[1]} onClick={() => setSort(s => ({ k, dir: s.k === k ? (s.dir * -1 as 1 | -1) : (left ? 1 : -1) }))}>{DEF[k]?.[0] ?? k}</th>
 
@@ -190,9 +201,9 @@ export default function App() {
     <div className="top">
       <a className="wordmark" onClick={() => go('home')} title="About SixPts" role="link" tabIndex={0}
          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') go('home') }}><i />SixPts</a>
-      <nav className="nav desk">{[['board', 'Board'], ['games', 'Games'], ['record', 'Record']].map(([v, l]) => <a key={v} className={view === v ? 'on' : ''} onClick={() => go(v)}>{l}</a>)}</nav>
+      <nav className="nav desk" aria-label="Sections">{[['board', 'Board'], ['games', 'Games'], ['record', 'Record']].map(([v, l]) => <button key={v} className={view === v ? 'on' : ''} aria-current={view === v ? 'page' : undefined} onClick={() => go(v)}>{l}</button>)}</nav>
       <div className="right">
-        <div className="week"><button aria-label="Previous week" onClick={() => go(view, Math.max(1, week - 1))}>‹</button><span>Wk {week}</span><button aria-label="Next week" onClick={() => go(view, week + 1)}>›</button></div>
+        <div className="week"><button aria-label="Previous week" onClick={() => go(view, Math.max(1, week - 1))}>‹</button><span>{week ? `Wk ${week}` : 'Wk —'}</span><button aria-label="Next week" onClick={() => go(view, week + 1)}>›</button></div>
         <div className="settings-wrap">
           <button className={'icon' + (canSave ? ' live' : '')} aria-label="Settings" title={canSave ? 'Signed in — picks save to the server' : 'Settings'} onClick={() => setSettings(s => !s)}>⚙</button>
           {settings && <div className="popover" role="dialog" aria-label="Settings">
@@ -205,7 +216,7 @@ export default function App() {
               ? <button className="btn" onClick={() => signOut()}>Sign out</button>
               : <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
                   <input className="keyfield" type="email" placeholder="email" value={email} onChange={e => setEmail(e.target.value)} />
-                  <button className="btn" onClick={() => { if (email) { signIn(email); alert('Check your email for the sign-in link.') } }}>Sign in</button>
+                  <button className="btn" onClick={() => { if (email) { signIn(email); say('Sign-in link sent. Check your email.') } }}>Sign in</button>
                 </div>)}
             <label className="muted" style={{ display: 'block', fontSize: 12, marginTop: 8 }}>Admin key
               <input className="keyfield" type="password" placeholder="optional" value={token}
@@ -216,17 +227,18 @@ export default function App() {
         </div>
       </div>
     </div>
-    <nav className="tabs">{[['board', 'Board'], ['games', 'Games'], ['record', 'Record']].map(([v, l]) => <a key={v} className={view === v ? 'on' : ''} onClick={() => go(v)}>{l}</a>)}</nav>
-    <div className="wrap">{body}</div></>)
+    <nav className="tabs" aria-label="Sections">{[['board', 'Board'], ['games', 'Games'], ['record', 'Record']].map(([v, l]) => <a key={v} href={`?view=${v}&week=${week}`} className={view === v ? 'on' : ''} aria-current={view === v ? 'page' : undefined} onClick={e => { e.preventDefault(); go(v) }}>{l}</a>)}</nav>
+    <div className="wrap">{body}</div>
+    {toast && <div className={'toast' + (toast.warn ? ' warn' : '')} role="status">{toast.msg}</div>}</>)
 
   if (view === 'home') return <Landing onEnter={enter} entered={entered} />
   if (err) return shell(<p className="empty">{err}</p>)
-  if (!data) return shell(<div className="sk-rows" aria-busy="true" aria-label="Loading the board">
+  if (!data) return shell(<><div className="sk-rows" aria-busy="true" aria-label="Loading the board">
     {Array.from({ length: 8 }).map((_, i) => <div className="sk-row" key={i}>
       <div className="skeleton" style={{ width: `${58 + (i % 3) * 12}%` }} /><div className="skeleton" style={{ width: '70%' }} />
       <div className="skeleton" /><div className="skeleton" /><div className="skeleton" style={{ width: '80%' }} />
     </div>)}
-  </div>)
+  </div>{waking && <p className="waking" role="status"><i />Waking the server. The first visit of the day takes up to a minute; after that it's instant.</p>}</>)
   if (view === 'games') return shell(<Games week={week} season={data.season} />)
   if (view === 'record') return shell(<Record />)
 
@@ -240,12 +252,12 @@ export default function App() {
     {data.injury_report && data.injury_report.startsWith('not') && <div className="banner">Injury report {data.injury_report}. Availability notes appear once it's loaded — verify a player is active before kickoff.</div>}
 
     <div className="games">
-      <div className={'game' + (game ? '' : ' on')} onClick={() => setGame('')}><b>All games</b><small>{data.slate.length} this week</small></div>
-      {data.slate.map(g => { const [, , a, h] = g.game.split('_'); return <div key={g.game} className={'game' + (game === g.game ? ' on' : '')} onClick={() => setGame(game === g.game ? '' : g.game)}><b>{a} @ {h}</b><small>{g.kickoff.slice(5)} · O/U {g.total}</small></div> })}
+      <button className={'game' + (game ? '' : ' on')} aria-pressed={!game} onClick={() => setGame('')}><b>All games</b><small>{data.slate.length} this week</small></button>
+      {data.slate.map(g => { const [, , a, h] = g.game.split('_'); return <button key={g.game} className={'game' + (game === g.game ? ' on' : '')} aria-pressed={game === g.game} onClick={() => setGame(game === g.game ? '' : g.game)}><b>{a} @ {h}</b><small>{g.kickoff.slice(5)} · O/U {g.total}</small></button> })}
     </div>
 
     {market === 'td' && mp && <div className="panel">
-      <div className="head" onClick={togglePicks}><h2>SixPts picks</h2><span className="muted">{mp.priced ? `${mp.bets.length} bet · ${mp.leans.length} lean · ${mp.passes.length} pass` : 'no prices loaded'}</span><span className="caret" style={{ transform: picksOpen ? 'rotate(90deg)' : 'none' }}>▸</span></div>
+      <button className="head" aria-expanded={picksOpen} onClick={togglePicks}><h2>SixPts picks</h2><span className="muted">{mp.priced ? `${mp.bets.length} bet · ${mp.leans.length} lean · ${mp.passes.length} pass` : 'no prices loaded'}</span><span className="caret" style={{ transform: picksOpen ? 'rotate(90deg)' : 'none' }}>▸</span></button>
       {picksOpen && <div className="body">
         {mp.priced === 0 ? <p className="muted">Prices aren't posted for this week yet. Type the price your book is offering on any row and the model will reason over it.</p> : <>
           <div className="bar" style={{ margin: '10px 0 4px' }}><div className="seg">{(['bets', 'leans', 'passes'] as const).map(t => <button key={t} className={tier === t ? 'on' : ''} onClick={() => setTier(t)}>{t === 'bets' ? 'Bet' : t === 'leans' ? 'Lean' : 'Pass'} · {mp[t].filter((c: any) => !game || c.game_id === game).length}</button>)}</div>
@@ -284,7 +296,7 @@ export default function App() {
       {rows.length === 0 && <div className="empty">No players match.</div>}
       {rows.map((r: any) => { const id = rid(r); const s = store[id] || {}; const [mc, ml] = matchTag(r); const bb = realBooks(r); return (
         <div key={id} className={'card' + (open === id ? ' open' : '')}>
-          <div className="card-head" onClick={() => setOpen(open === id ? null : id)}>
+          <div className="card-head" role="button" tabIndex={0} aria-expanded={open === id} onClick={() => setOpen(open === id ? null : id)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(open === id ? null : id) } }}>
             <div><div className="player">{r.player}{r.new_team && <span className="tag">new</span>}</div><div className="muted">{r.position} · {r.team} {r.spread > 0 ? '+' : ''}{r.spread} vs {r.opp} · <span className={'match ' + mc}>{ml}</span></div></div>
             <div className="card-num"><span className={'p ' + heat(r.p_model)}>{pct(r.p_model)}</span><div className="muted">fair {fmtOdds(r.fair_odds)}</div></div>
           </div>
@@ -305,14 +317,14 @@ export default function App() {
       <tbody>
         {rows.length === 0 && <tr><td colSpan={visibleCount + 2} className="empty">No players match.</td></tr>}
         {rows.map((r: any) => { const id = rid(r); const s = store[id] || {}; const [mc, ml] = matchTag(r); const bb = realBooks(r); const best = bestBook(r); return (<>
-          <tr key={id} className={'row' + (open === id ? ' open' : '')} onClick={() => setOpen(open === id ? null : id)}>
+          <tr key={id} className={'row' + (open === id ? ' open' : '')} tabIndex={0} aria-expanded={open === id} onClick={() => setOpen(open === id ? null : id)} onKeyDown={e => { if (e.target !== e.currentTarget) return; if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(open === id ? null : id) } }}>
             <td className="l"><span className="player">{r.player}<small>{r.position} {r.team}</small>{r.new_team && <span className="tag">new</span>}</span></td>
             {show('team') && <td className="l">{r.spread > 0 ? '+' : ''}{r.spread} vs {r.opp} <span className={'match ' + mc}>{ml}</span></td>}
             <td className="num"><span className={'p ' + heat(r.p_model)}>{market === 'rec' && !r.recLine ? '—' : pct(r.p_model)}</span></td>
             {show('fair_odds') && <td className="num">{market === 'rec' && !r.recLine ? '—' : fmtOdds(r.fair_odds)}</td>}
             {show('book') && <td className={'l' + (moved.has(id) ? ' moved' : '')} onClick={e => e.stopPropagation()}>{bb ? <span className="books">{Object.entries(bb).map(([b, p]) => <span key={b} className={'book' + (best?.[0] === b ? ' best' : '') + (s.book === b ? ' on' : '')} title={s.book === b ? 'Using this price' : 'Click to use this price'} onClick={() => useBook(r, b, p as number)}><small>{BOOK_ABBR[b] || b}</small><b>{fmtOdds(p as number)}</b></span>)}</span>
               : <input className="odds" type="number" step={5} placeholder="+150" value={s.odds || ''} onChange={e => setManual(r, e.target.value)} onBlur={() => saveManual(r)} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} />}</td>}
-            {show('edge') && <td className={'num' + (moved.has(id) ? ' moved' : '')}>{r.edge == null ? <span className="muted">—</span> : <span className={'edge ' + (r.edge >= 0 ? 'pos' : 'neg')}>{r.edge >= .03 ? <span className="flag">{pts(r.edge)}</span> : pts(r.edge)}</span>}</td>}
+            {show('edge') && <td className={'num' + (moved.has(id) ? ' moved' : '')}>{r.edge == null ? <span className="muted">—</span> : <span className={'edge ' + (r.edge >= 0 ? 'pos' : 'neg') + (r.certainty_label === 'low' ? ' thin' : '')} title={r.certainty_label === 'low' ? 'Low certainty: sorted below firmer edges' : undefined}>{r.edge >= .03 ? <span className="flag">{pts(r.edge)}</span> : pts(r.edge)}</span>}</td>}
             {market === 'rec' && <td className="num">{n1(r.exp_targets, 1)} / {n1(r.exp_rec, 1)}</td>}
             {market === 'rec' && <td onClick={e => e.stopPropagation()}><input className="odds" type="number" step={0.5} placeholder="4.5" value={r.recLine} onChange={e => setStore(st => ({ ...st, [id]: { ...st[id], recLine: e.target.value } }))} /></td>}
             {show('xtd_pg_shrunk') && <td className="num">{n1(r.xtd_pg_shrunk)}</td>}{show('rz_tgt_pg') && <td className="num">{n1(r.rz_tgt_pg, 1)}</td>}{show('ez_tgt_pg') && <td className="num">{n1(r.ez_tgt_pg, 1)}</td>}{show('rz_carry_pg') && <td className="num">{n1(r.rz_carry_pg, 1)}</td>}{show('i5_carry_pg') && <td className="num">{n1(r.i5_carry_pg, 1)}</td>}
@@ -330,13 +342,15 @@ export default function App() {
     {data.sources && <div className="sources"><b>Sources</b>{Object.entries(data.sources).map(([k, v]) => <span key={k}>{v}</span>)}<span>Verify a player is active before kickoff.</span></div>}
     <div className="legal">SixPts is a research tool, not a sportsbook and not advice. 21+ · Gambling problem? Call 1-800-GAMBLER. · <a href="mailto:hello@sixpts.com">Contact</a></div>
 
-    <div className="tray">
+    <div className={'tray' + (picks.length ? '' : ' idle')}>
       <h2>Picks <span className="muted">{picks.length ? picks.length + ' logged' : 'none'}</span></h2>
       <div className="list">{picks.length === 0 ? <span className="muted">Pick from any row. Saved to the server when signed in; otherwise this browser only.</span> : picks.map(r => { const s = store[rid(r)]; const pr = priceFor(r, s); const ip = pr ? implied(pr.price) : null; return <span key={rid(r)} className="item">{r.player} · {pct(r.p_model)}{pr ? ` @ ${fmtOdds(pr.price)}` : ''}{ip != null ? ` · ${pts(r.p_model - ip)}` : ''}</span> })}</div>
       {parlay && <button className={'btn' + (showParlay ? ' on' : '')} onClick={() => setShowParlay(s => !s)}>
         Parlay {parlay.book_odds >= 0 ? '+' : ''}{parlay.book_odds} · {Math.round(parlay.joint_correlated * 100)}%</button>}
-      <button className="btn" onClick={copyPicks}>Copy CSV</button>
-      <button className="btn" onClick={() => { if (confirm('Clear all picks and prices for this week?')) setStore({}) }}>Clear</button>
+      {picks.length > 0 && <button className="btn" onClick={copyPicks}>Copy CSV</button>}
+      {Object.keys(store).length > 0 && (confirmClear
+        ? <span className="confirm">Clear this week's picks and prices? <button className="btn primary" onClick={() => { setStore({}); setConfirmClear(false); say('Cleared') }}>Clear</button><button className="btn" onClick={() => setConfirmClear(false)}>Keep</button></span>
+        : <button className="btn" onClick={() => setConfirmClear(true)}>Clear</button>)}
       {parlay && showParlay && <div className="parlay">
         <div className="parlay-grid">
           <div><h3>If you parlayed all {parlay.legs}</h3>
