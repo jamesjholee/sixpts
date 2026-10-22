@@ -113,7 +113,6 @@ th.sorted{color:var(--paint)} th.sorted::after{content:" ↓";color:var(--bulb)}
 td{padding:10px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 tr.row{cursor:pointer;transition:background var(--quick) var(--ease)}
 tr.row:focus-visible{outline:2px solid var(--bulb);outline-offset:-2px}
-.thin{opacity:.55}
 tr.row:hover td{background:var(--raise)}
 tr.row.open td{background:var(--raise)}
 tbody tr.row:nth-child(-n+14){animation:rise var(--settle) var(--ease) backwards}

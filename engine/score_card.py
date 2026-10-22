@@ -15,6 +15,50 @@ D = pathlib.Path(os.environ.get("SIXPTS_DATA", "data"))
 BUCKETS = [0, .10, .20, .30, .40, .50, 1.01]
 LABELS = ["under 10%", "10–20%", "20–30%", "30–40%", "40–50%", "50%+"]
 
+def vs_market(b: pd.DataFrame, week: int) -> dict | None:
+    """The benchmark that matters: did we beat the book? Uses the last stored price per (player, book) for the
+    week — the Friday refresh, close to closing. Reports model vs market Brier/AUC on the same players, the hit
+    rate of every edge bucket (model-vs-best-price, the old definition), and flat-bet ROI of the blended picks."""
+    from sqlalchemy import create_engine, text
+    from engine.market import market_for_week, blend, implied
+    from engine.grade import _pg
+    try:
+        eng = create_engine(_pg(os.environ.get("DATABASE_URL", "sqlite:///data/sixpts.db")))
+        with eng.begin() as c:
+            rows = c.execute(text("select gsis_id, game_id, book, price, fetched_at from odds where market='anytime_td' and source<>'pf' and game_id like :w order by fetched_at desc"), {"w": f"%_{week:02d}_%"}).mappings().all()
+    except Exception as e:
+        print("no odds table / db:", e); return None
+    if not rows: return None
+    board = b.to_dict("records")
+    mkt = market_for_week(rows, board)
+    best = {}
+    for r in rows:
+        k = f"{r['gsis_id']}|{r['game_id']}"; kb = (k, r["book"])
+        if kb in best: continue
+        best[kb] = r["price"]
+    bestp = {}
+    for (k, _), pr in best.items(): bestp[k] = max(bestp.get(k, -1e9), pr)
+    b = b.copy(); b["key"] = b.gsis_id + "|" + b.game_id
+    b["p_market"] = b.key.map(mkt); b["best"] = b.key.map(bestp)
+    m = b.dropna(subset=["p_market", "best"]).copy()
+    if len(m) < 30: return None
+    m["p_bet"] = [blend(p, q, c)[0] for p, q, c in zip(m.p_model, m.p_market, m.get("certainty_label", pd.Series(["medium"] * len(m), index=m.index)))]
+    m["ip_best"] = m.best.map(implied)
+    y = m.scored.values
+    from sklearn.metrics import roc_auc_score
+    def sc(p): return dict(brier=round(float(((p - y) ** 2).mean()), 4), auc=round(float(roc_auc_score(y, p)), 3)) if 0 < y.mean() < 1 else dict(brier=None, auc=None)
+    edges = m.p_model - m.ip_best
+    buckets = []
+    for lo, hi, lab in [(-9, -.05, "book higher by 5+"), (-.05, -.02, "book higher 2–5"), (-.02, .02, "agree ±2"), (.02, .05, "we're higher 2–5"), (.05, .10, "we're higher 5–10"), (.10, 9, "we're higher 10+")]:
+        s = m[(edges > lo) & (edges <= hi)]
+        if len(s): buckets.append(dict(bucket=lab, n=int(len(s)), model=round(float(s.p_model.mean()), 3), market=round(float(s.ip_best.mean()), 3), actual=round(float(s.scored.mean()), 3)))
+    dec = m.best.map(lambda o: 1 + (o / 100 if o > 0 else 100 / -o))
+    pnl_raw = np.where(m.scored == 1, dec - 1, -1.0)
+    sel_old = (edges >= .03); sel_new = ((m.p_bet - m.ip_best) >= .03)
+    roi = lambda sel: dict(n=int(sel.sum()), units=round(float(pnl_raw[sel].sum()), 2), roi=round(float(pnl_raw[sel].mean()), 3) if sel.sum() else None, hit=round(float(m.scored[sel].mean()), 3) if sel.sum() else None, avg_price=int(m.best[sel].mean()) if sel.sum() else None)
+    return dict(n=int(len(m)), model=sc(m.p_model.values), market=sc(m.p_market.values), blend=sc(m.p_bet.values),
+                edge_buckets=buckets, flat_bet_model_edge_3=roi(sel_old), flat_bet_blend_edge_3=roi(sel_new))
+
 def main(season: int, week: int):
     f = D / f"board_w{week}_public.json"
     if not f.exists(): print(f"no board for week {week}"); return
@@ -45,6 +89,8 @@ def main(season: int, week: int):
                brier=round(brier, 4), brier_skill_vs_base_rate=round(float(skill), 4),
                top20_hit_rate=round(float(top.scored.mean()), 3), top20_expected=round(float(top.p_model.mean()), 3),
                calibration=cal, top20=top_rows, scored_despite_low=fmt(miss_low), favored_but_blanked=fmt(miss_high))
+    mk = vs_market(b, week)
+    if mk: out["market"] = mk
     json.dump(out, open(D / f"scorecard_w{week}.json", "w"))
 
     print(f"Week {week}: {n} players who took a snap · actually scored {act:.1%} · model averaged {pred:.1%}")
@@ -55,6 +101,11 @@ def main(season: int, week: int):
     for r in top_rows[:10]: print(f"  {'✓' if r['scored'] else '·'} {r['player']:<22} {r['team']} vs {r['opp']}  {r['p_model']:.0%}")
     print("\nScored despite a low number:"); [print(f"  {r['player']:<22} {r['p_model']:.0%} → {r['tds']} TD") for r in fmt(miss_low)]
     print("Highest numbers that blanked:"); [print(f"  {r['player']:<22} {r['p_model']:.0%}") for r in fmt(miss_high)]
+    if mk:
+        print(f"\nVs the market ({mk['n']} priced players): model AUC {mk['model']['auc']} · market AUC {mk['market']['auc']} · blend AUC {mk['blend']['auc']}")
+        for e in mk["edge_buckets"]: print(f"  {e['bucket']:<20} n={e['n']:3d}  model {e['model']:.0%}  market {e['market']:.0%}  actual {e['actual']:.0%}")
+        o, n2 = mk["flat_bet_model_edge_3"], mk["flat_bet_blend_edge_3"]
+        print(f"  flat-bet 3+ pts edge — model-vs-price: {o['n']} bets {o['units']:+.1f}u · blended: {n2['n']} bets {n2['units']:+.1f}u")
     print(f"\nwrote {D / f'scorecard_w{week}.json'}")
 
 if __name__ == "__main__":
