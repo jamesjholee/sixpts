@@ -41,7 +41,7 @@ const DEF: Record<string, [string, string]> = {
   p_model: ['P(TD)', 'Model probability the player scores a rushing or receiving touchdown in this game.'],
   fair_odds: ['Fair', 'American odds matching P(TD) with no vig. Bet only when the book pays more than this.'],
   book: ['Book', 'Prices by sportsbook when loaded (best is highlighted; click to use it). Otherwise type one.'],
-  edge: ['Edge', 'Model probability minus the book\'s implied probability, in points. 3+ is flagged.'],
+  edge: ['Edge', 'The number we bet on minus the book\'s implied probability, in points. The bet number blends our model with the devigged market by certainty (high 50/50, medium 35/65, low 20/80) because when the two disagree the market has been right more often. 3+ is flagged.'],
   xtd_pg_shrunk: ['xTD/g', 'Expected touchdowns per game from where his touches happen, blended with last season.'],
   rz_tgt_pg: ['RZ tgt', 'Red zone targets per game.'], ez_tgt_pg: ['EZ tgt', 'End zone targets per game.'],
   rz_carry_pg: ['RZ car', 'Red zone carries per game.'], i5_carry_pg: ['GL car', 'Carries inside the 5 per game. A carry from the 1 scores about half the time.'],
@@ -82,6 +82,7 @@ export default function App() {
 
   // ---- data
   const [data, setData] = useState<Board | null>(null); const [err, setErr] = useState('')
+  const [mkt, setMkt] = useState<Record<string, number>>({})
   const [books, setBooks] = useState<BookMap>({}); const [moved, setMoved] = useState<Set<string>>(new Set()); const [mp, setMp] = useState<any>(null); const [tick, setTick] = useState(0); const [live, setLive] = useState<any[]>([]); const [freshTd, setFreshTd] = useState<Set<string>>(new Set())
   const [market, setMarket] = useState<'td' | 'rec'>('td')
   useEffect(() => {
@@ -94,6 +95,7 @@ export default function App() {
         const fresh = (d.touchdowns || []).filter((t: any) => prev.length && !seen.has(t.play_id)).map((t: any) => t.play_id)
         if (fresh.length) { setFreshTd(new Set(fresh)); setTimeout(() => setFreshTd(new Set()), 2400) }
         return d.touchdowns || [] }) }).catch(() => {}); pull(); const t = setInterval(pull, 30000); return () => clearInterval(t) }, [week])
+  useEffect(() => { if (!week || market !== 'td') { setMkt({}); return }; fetch(`${API}/api/market/${week}`, { headers: authHeaders() }).then(r => r.ok ? r.json() : {}).then(setMkt).catch(() => {}) }, [week, market, tick, session, token])
   useEffect(() => { if (!week) return; fetch(`${API}/api/odds/${week}?market=${market === 'rec' ? 'receptions' : 'anytime_td'}`, { headers: authHeaders() }).then(r => r.ok ? r.json() : {})
       .then((next: BookMap) => {
         setBooks(prev => {
@@ -153,22 +155,22 @@ export default function App() {
   const bestBook = (r: Row) => { const b = realBooks(r) || books[rid(r)]; if (!b) return null; let best: [string, number] | null = null; for (const [k, v] of Object.entries(b)) if (!best || v > best[1]) best = [k, v]; return best }
   const priceFor = (r: Row, s: Store[string]) => { if (s?.odds) return { price: Number(s.odds), book: s.book || 'manual' }; const b = bestBook(r); return b ? { price: b[1], book: b[0] } : null }
 
-  const CERT_W: Record<string, number> = { high: 1, medium: .7, low: .4 }
-  const wEdge = (r: any) => r.edge * (CERT_W[r.certainty_label] ?? .7)
+  // the number we bet on: model blended with the devigged market, weighted by certainty (engine/market.py)
+  const MODEL_W: Record<string, number> = { high: .5, medium: .35, low: .2 }
+  const betP = (r: Row) => { const m = mkt[rid(r)]; if (m == null) return { p: r.p_model, m: null }; const w = MODEL_W[r.certainty_label || 'medium'] ?? .35; return { p: w * r.p_model + (1 - w) * m, m } }
   const rows = useMemo(() => {
     if (!data) return []
     return data.board.map(r => { const s = store[rid(r)] || {}; const pr = priceFor(r, s); const ip = pr ? implied(pr.price) : null
         if (market === 'rec') { const line = Number(s.recLine); const pm = (line && r.exp_rec != null) ? pOver(r.exp_rec, r.rec_sd || 2, line) : null
           return { ...r, p_model: pm ?? r.p_model, fair_odds: pm ? amer(pm) : r.fair_odds, price: pr, recLine: s.recLine || '', edge: (pm != null && ip != null) ? pm - ip : null, picked: !!s.picked } }
-        return { ...r, price: pr, recLine: s.recLine || '', edge: ip == null ? null : r.p_model - ip, picked: !!s.picked } })
+        const b = betP(r)
+        return { ...r, price: pr, recLine: s.recLine || '', p_bet: b.p, p_market: b.m, edge: ip == null ? null : b.p - ip, picked: !!s.picked } })
       // a search names a specific player, so it overrides the probability floor — otherwise searching
       // a longshot returns nothing and the page reads as "he isn't on our board"
       .filter(r => { const hit = !q || `${r.player} ${r.team} ${r.opp}`.toLowerCase().includes(q.toLowerCase())
         return hit && (!pos || r.position === pos) && (!game || r.game_id === game) && (q ? true : r.p_model * 100 >= minp) && (!onlyEdge || (r.edge != null && r.edge >= .03)) && (!onlyPicks || r.picked) })
-      // edge is weighted by certainty for ordering only (the number shown is untouched): a +17 on a committee
-      // back with two games of data should not outrank a +9 on a locked-in starter
-      .sort((a: any, b: any) => { if (sort.k === 'edge') { const ax = a.edge == null, bx = b.edge == null; if (ax && bx) return b.p_model - a.p_model; if (ax) return 1; if (bx) return -1; return (wEdge(b) - wEdge(a)) * (sort.dir === -1 ? 1 : -1) } let x = a[sort.k], y = b[sort.k]; if (x == null) x = -1e9; if (y == null) y = -1e9; return typeof x === 'string' ? x.localeCompare(y) * sort.dir : (x - y) * sort.dir })
-  }, [data, store, books, pos, game, minp, onlyEdge, onlyPicks, q, sort, market])
+      .sort((a: any, b: any) => { if (sort.k === 'edge') { const ax = a.edge == null, bx = b.edge == null; if (ax && bx) return b.p_model - a.p_model; if (ax) return 1; if (bx) return -1; return (b.edge - a.edge) * (sort.dir === -1 ? 1 : -1) } let x = a[sort.k], y = b[sort.k]; if (x == null) x = -1e9; if (y == null) y = -1e9; return typeof x === 'string' ? x.localeCompare(y) * sort.dir : (x - y) * sort.dir })
+  }, [data, store, books, mkt, pos, game, minp, onlyEdge, onlyPicks, q, sort, market])
 
   const logPick = (r: any, s: Store[string]) => {
     const now = !s?.picked; const pr = priceFor(r, s || {})
@@ -191,7 +193,7 @@ export default function App() {
       .then(r => r.ok ? r.json() : null).then(setParlay).catch(() => setParlay(null))
   }, [picks.length, JSON.stringify(picks.map(r => [rid(r), store[rid(r)]?.odds])), week])
   const copyPicks = () => { const head = 'week,game,team,opp,player,position,p_model,fair_odds,book,book_odds,implied,edge,picked_at\n'
-    const body = picks.map(r => { const s = store[rid(r)]; const pr = priceFor(r, s); const ip = pr ? implied(pr.price) : null; return [week, r.game_id, r.team, r.opp, r.player, r.position, r.p_model.toFixed(3), fmtOdds(r.fair_odds), pr?.book || '', pr?.price || '', ip == null ? '' : ip.toFixed(3), ip == null ? '' : (r.p_model - ip).toFixed(3), s.pickedAt || ''].join(',') }).join('\n')
+    const body = picks.map(r => { const s = store[rid(r)]; const pr = priceFor(r, s); const ip = pr ? implied(pr.price) : null; return [week, r.game_id, r.team, r.opp, r.player, r.position, r.p_model.toFixed(3), fmtOdds(r.fair_odds), pr?.book || '', pr?.price || '', ip == null ? '' : ip.toFixed(3), ip == null ? '' : (betP(r).p - ip).toFixed(3), s.pickedAt || ''].join(',') }).join('\n')
     navigator.clipboard?.writeText(head + body).then(() => say(`Copied ${picks.length} pick${picks.length === 1 ? '' : 's'} as CSV`)).catch(() => say('Clipboard blocked. Sign in to save picks instead.', true)) }
 
   const th = (k: string, left = false) => <th className={(left ? 'l ' : '') + (sort.k === k ? 'sorted' : '')} title={DEF[k]?.[1]} onClick={() => setSort(s => ({ k, dir: s.k === k ? (s.dir * -1 as 1 | -1) : (left ? 1 : -1) }))}>{DEF[k]?.[0] ?? k}</th>
@@ -303,7 +305,7 @@ export default function App() {
           <div className="card-row">
             {bb ? <span className="books">{Object.entries(bb).map(([b, p]) => <span key={b} className={'book' + (bestBook(r)?.[0] === b ? ' best' : '') + (s.book === b ? ' on' : '')} onClick={() => useBook(r, b, p as number)}><small>{BOOK_ABBR[b] || b}</small><b>{fmtOdds(p as number)}</b></span>)}</span>
               : <input className="odds" type="number" step={5} placeholder="+150" value={s.odds || ''} onChange={e => setManual(r, e.target.value)} onBlur={() => saveManual(r)} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} />}
-            <span className="num">{r.edge == null ? <span className="muted">no edge yet</span> : <b className={'edge ' + (r.edge >= 0 ? 'pos' : 'neg')}>{r.edge >= .03 ? <span className="flag">{pts(r.edge)}</span> : pts(r.edge)}</b>}</span>
+            <span className="num">{r.edge == null ? <span className="muted">no edge yet</span> : <b className={'edge ' + (r.edge >= 0 ? 'pos' : 'neg')} title={r.p_market != null ? `Model ${pct(r.p_model)} · market ${pct(r.p_market)} · bet as ${pct(r.p_bet)}` : undefined}>{r.edge >= .03 ? <span className="flag">{pts(r.edge)}</span> : pts(r.edge)}</b>}</span>
             <button className={'pick ' + (s.picked ? 'on' : '')} onClick={() => logPick(r, s)}>{s.picked ? 'Picked' : 'Pick'}</button>
           </div>
           {(r.flags || []).length > 0 && <div className="card-flags">{(r.flags || []).slice(0, open === id ? 99 : 2).map((f: string) => <span key={f} className={'chip' + (/QUESTIONABLE|falling|regression risk/.test(f) ? ' warn' : '')}>{f}</span>)}</div>}
@@ -324,7 +326,7 @@ export default function App() {
             {show('fair_odds') && <td className="num">{market === 'rec' && !r.recLine ? '—' : fmtOdds(r.fair_odds)}</td>}
             {show('book') && <td className={'l' + (moved.has(id) ? ' moved' : '')} onClick={e => e.stopPropagation()}>{bb ? <span className="books">{Object.entries(bb).map(([b, p]) => <span key={b} className={'book' + (best?.[0] === b ? ' best' : '') + (s.book === b ? ' on' : '')} title={s.book === b ? 'Using this price' : 'Click to use this price'} onClick={() => useBook(r, b, p as number)}><small>{BOOK_ABBR[b] || b}</small><b>{fmtOdds(p as number)}</b></span>)}</span>
               : <input className="odds" type="number" step={5} placeholder="+150" value={s.odds || ''} onChange={e => setManual(r, e.target.value)} onBlur={() => saveManual(r)} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} />}</td>}
-            {show('edge') && <td className={'num' + (moved.has(id) ? ' moved' : '')}>{r.edge == null ? <span className="muted">—</span> : <span className={'edge ' + (r.edge >= 0 ? 'pos' : 'neg') + (r.certainty_label === 'low' ? ' thin' : '')} title={r.certainty_label === 'low' ? 'Low certainty: sorted below firmer edges' : undefined}>{r.edge >= .03 ? <span className="flag">{pts(r.edge)}</span> : pts(r.edge)}</span>}</td>}
+            {show('edge') && <td className={'num' + (moved.has(id) ? ' moved' : '')}>{r.edge == null ? <span className="muted">—</span> : <span className={'edge ' + (r.edge >= 0 ? 'pos' : 'neg')} title={r.p_market != null ? `Model ${pct(r.p_model)} · market ${pct(r.p_market)} · bet as ${pct(r.p_bet)}` : 'No consensus price yet: edge is model minus this price'}>{r.edge >= .03 ? <span className="flag">{pts(r.edge)}</span> : pts(r.edge)}</span>}</td>}
             {market === 'rec' && <td className="num">{n1(r.exp_targets, 1)} / {n1(r.exp_rec, 1)}</td>}
             {market === 'rec' && <td onClick={e => e.stopPropagation()}><input className="odds" type="number" step={0.5} placeholder="4.5" value={r.recLine} onChange={e => setStore(st => ({ ...st, [id]: { ...st[id], recLine: e.target.value } }))} /></td>}
             {show('xtd_pg_shrunk') && <td className="num">{n1(r.xtd_pg_shrunk)}</td>}{show('rz_tgt_pg') && <td className="num">{n1(r.rz_tgt_pg, 1)}</td>}{show('ez_tgt_pg') && <td className="num">{n1(r.ez_tgt_pg, 1)}</td>}{show('rz_carry_pg') && <td className="num">{n1(r.rz_carry_pg, 1)}</td>}{show('i5_carry_pg') && <td className="num">{n1(r.i5_carry_pg, 1)}</td>}
@@ -344,7 +346,7 @@ export default function App() {
 
     <div className={'tray' + (picks.length ? '' : ' idle')}>
       <h2>Picks <span className="muted">{picks.length ? picks.length + ' logged' : 'none'}</span></h2>
-      <div className="list">{picks.length === 0 ? <span className="muted">Pick from any row. Saved to the server when signed in; otherwise this browser only.</span> : picks.map(r => { const s = store[rid(r)]; const pr = priceFor(r, s); const ip = pr ? implied(pr.price) : null; return <span key={rid(r)} className="item">{r.player} · {pct(r.p_model)}{pr ? ` @ ${fmtOdds(pr.price)}` : ''}{ip != null ? ` · ${pts(r.p_model - ip)}` : ''}</span> })}</div>
+      <div className="list">{picks.length === 0 ? <span className="muted">Pick from any row. Saved to the server when signed in; otherwise this browser only.</span> : picks.map(r => { const s = store[rid(r)]; const pr = priceFor(r, s); const ip = pr ? implied(pr.price) : null; return <span key={rid(r)} className="item">{r.player} · {pct(r.p_model)}{pr ? ` @ ${fmtOdds(pr.price)}` : ''}{ip != null ? ` · ${pts(betP(r).p - ip)}` : ''}</span> })}</div>
       {parlay && <button className={'btn' + (showParlay ? ' on' : '')} onClick={() => setShowParlay(s => !s)}>
         Parlay {parlay.book_odds >= 0 ? '+' : ''}{parlay.book_odds} · {Math.round(parlay.joint_correlated * 100)}%</button>}
       {picks.length > 0 && <button className="btn" onClick={copyPicks}>Copy CSV</button>}
@@ -390,6 +392,7 @@ export default function App() {
         <div className="block"><h3>Defense · {r.opp} <b className={(r.c_defense ?? 0) >= 0 ? 'pos' : 'neg'}>{pts(r.c_defense)}</b></h3>
           <Stat k="def_rz_td_pct" v={r.def_rz_td_pct == null ? '—' : Math.round(r.def_rz_td_pct * 100) + '%'} /><Stat label="TDs / game to RB" v={n1(r.def_td_rb_pg)} /><Stat label="to WR" v={n1(r.def_td_wr_pg)} /><Stat label="to TE" v={n1(r.def_td_te_pg)} />{r.matchup_note && <Stat label="Coverage" v={r.matchup_note} />}</div>
         <div className="block"><h3>Game <b className={(r.c_environment ?? 0) >= 0 ? 'pos' : 'neg'}>{pts(r.c_environment)}</b></h3>
+          {r.p_market != null && <Stat label="Market says" v={pct(r.p_market)} />}{r.p_market != null && <Stat label="We bet as" v={pct(r.p_bet)} />}
           <Stat k="implied" v={r.implied.toFixed(1) + ' pts'} /><Stat label="Over / under" v={String(r.total)} /><Stat label="Spread" v={r.spread > 0 ? 'favored by ' + r.spread : 'underdog by ' + (-r.spread)} /></div>
       </div></>)
   }

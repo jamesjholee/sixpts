@@ -111,3 +111,25 @@ other's red zone trips; opponents in a shootout rise together. My first version 
 asserted that same-game legs always help — the simulation disproved it on the first test.
 
 Nothing here makes parlays a good idea: the vig compounds with every leg, and the panel reports how much.
+
+## Oct 22 2026 — favorites check, and why the model was NOT changed
+
+Weeks 1–6 graded (1,708 player-games): Brier skill +8.4% vs base rate, AUC .68, calibration within noise at
+every decile except the top band, where players priced at even money or better scored 76% against a 57%
+prediction (n=45). Tested whether that is structural, walk-forward on 2021–24 → 2025 and 2021–25 → 2026 W1–6:
+
+| variant | 2025 holdout AUC | 2025 fav ≥50% pred→act | 2026 W1–6 fav ≥50% pred→act |
+|---|---|---|---|
+| baseline (K_OPP 25) | .694 | .614 → .535 | .580 → .756 |
+| K_OPP 12 | .695 | .610 → .555 | .583 → .743 |
+| K_OPP 6 | .695 | .646 → .609 | .594 → .730 |
+| + team xTD rank / share-of-top feats | .696 | .619 → .545 | .567 → .732 |
+
+In 2025 the same band was *over*-predicted; no variant moves 2026 and none improves log-loss. The 2026 gap is
+~2.4 SD of binomial noise on 45 rows and reverses in the prior season, so it was left alone. Revisit after Week 12
+with the pooled sample; if high-certainty players are still under by 4+ points, fit a per-certainty recalibration.
+
+What did change (engine/market.py): the bet number is a certainty-weighted blend of model and devigged
+market, because on the one week with raw prices in the repo (W2) the model's ranking skill equals the book's
+(AUC .709 vs .715) and every bucket where we were above the market under-performed the market's number.
+The scorecard now reports model-vs-market every week.
