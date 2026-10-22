@@ -133,7 +133,8 @@ export default function App() {
   const [open, setOpen] = useState<string | null>(null)
   const [density, setDensity] = useState<'simple' | 'full'>(() => { try { return (localStorage.getItem('sixpts_density') as any) || 'simple' } catch { return 'simple' } })
   const setDens = (d: 'simple' | 'full') => { setDensity(d); try { localStorage.setItem('sixpts_density', d) } catch {} }
-  const [more, setMore] = useState(false); const [tier, setTier] = useState<'bets' | 'leans' | 'passes'>('bets'); const [pickOpen, setPickOpen] = useState<string | null>(null); const [picksOpen, setPicksOpen] = useState(() => { try { return localStorage.getItem('sixpts_picks_open') !== '0' } catch { return true } })
+  const [more, setMore] = useState(false); const [tier, setTier] = useState<'bets' | 'leans' | 'passes'>('bets');
+  const TIER_LABEL: Record<string, string> = { bets: 'Longshot', leans: 'Lean', passes: 'Pass' }; const [pickOpen, setPickOpen] = useState<string | null>(null); const [picksOpen, setPicksOpen] = useState(() => { try { return localStorage.getItem('sixpts_picks_open') !== '0' } catch { return true } })
   const togglePicks = () => setPicksOpen(o => { try { localStorage.setItem('sixpts_picks_open', o ? '0' : '1') } catch {} ; return !o })
   const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 720)
   useEffect(() => { const f = () => setIsMobile(window.innerWidth < 720); window.addEventListener('resize', f); return () => window.removeEventListener('resize', f) }, [])
@@ -259,19 +260,19 @@ export default function App() {
     </div>
 
     {market === 'td' && mp && <div className="panel">
-      <button className="head" aria-expanded={picksOpen} onClick={togglePicks}><h2>SixPts picks</h2><span className="muted">{mp.priced ? `${mp.bets.length} bet · ${mp.leans.length} lean · ${mp.passes.length} pass` : 'no prices loaded'}</span><span className="caret" style={{ transform: picksOpen ? 'rotate(90deg)' : 'none' }}>▸</span></button>
+      <button className="head" aria-expanded={picksOpen} onClick={togglePicks}><h2>SixPts picks</h2><span className="muted">{mp.priced ? `${mp.bets.length} longshot · ${mp.leans.length} lean · ${mp.passes.length} pass` : 'no prices loaded'}</span><span className="caret" style={{ transform: picksOpen ? 'rotate(90deg)' : 'none' }}>▸</span></button>
       {picksOpen && <div className="body">
         {mp.priced === 0 ? <p className="muted">Prices aren't posted for this week yet. Type the price your book is offering on any row and the model will reason over it.</p> : <>
-          <div className="bar" style={{ margin: '10px 0 4px' }}><div className="seg">{(['bets', 'leans', 'passes'] as const).map(t => <button key={t} className={tier === t ? 'on' : ''} onClick={() => setTier(t)}>{t === 'bets' ? 'Bet' : t === 'leans' ? 'Lean' : 'Pass'} · {mp[t].filter((c: any) => !game || c.game_id === game).length}</button>)}</div>
-            <span className="muted">{tier === 'bets' ? '5+ pts edge, all-but-one signals green, high certainty' : tier === 'leans' ? 'edge, but mixed signals or lower certainty' : 'no edge at the price, a red flag, or too few green signals — tap a row for why'}</span></div>
+          <div className="bar" style={{ margin: '10px 0 4px' }}><div className="seg">{(['bets', 'leans', 'passes'] as const).map(t => <button key={t} className={tier === t ? 'on' : ''} onClick={() => setTier(t)}>{TIER_LABEL[t]} · {mp[t].filter((c: any) => !game || c.game_id === game).length}</button>)}</div>
+            <span className="muted">{tier === 'bets' ? '+1200 to +4000 on RB/WR/TE with red zone looks, 3+ pts above the price. Books under-price these; one in six hits. Flat ¼ unit each, take the top of the list.' : tier === 'leans' ? '+150 to +1200, 3+ pts edge, signals green. Research only: this range has been break-even for us.' : 'no edge at the price, a red flag, or shorter than +150 (the book prices favorites well) — tap a row for why'}</span></div>
           {mp[tier].filter((c: any) => !game || c.game_id === game).length === 0 && <p className="muted">None{game ? ' in this game' : ''} at current prices.</p>}
           {mp[tier].filter((c: any) => !game || c.game_id === game).map((c: any) => { const k = c.gsis_id + c.game_id; const o = pickOpen === k || tier !== 'passes'; return <div key={k} className="pick-row" onClick={() => setPickOpen(pickOpen === k ? null : k)} style={{ cursor: tier === 'passes' ? 'pointer' : 'default' }}>
-            <span className={'tier ' + c.tier.toLowerCase()}>{c.tier}</span>
+            <span className={'tier ' + c.tier.toLowerCase()}>{c.tier === 'Longshot' ? 'Shot' : c.tier}</span>
             <div><div className="who">{c.player} <span className="muted">{c.position} · {c.team} vs {c.opp}</span></div><div className="why">{c.headline}</div>
               {o && <><div className="sig">{Object.entries(c.signals).map(([k2, v]: any) => <span key={k2} className={v ? 'ok' : 'no'}>{v ? '✓' : '✗'} {k2.replace('_', ' ')}</span>)}</div>
                 {c.reasons_for.length > 0 && <div className="muted" style={{ marginTop: 4 }}>For: {c.reasons_for.join(' · ')}</div>}
                 {c.reasons_against.length > 0 && <div className="muted" style={{ marginTop: 2 }}>Against: {c.reasons_against.join(' · ')}</div>}</>}</div>
-            <div className="price"><b>{fmtOdds(c.price)}</b><div className="muted">{BOOK_ABBR[c.book] || c.book}{c.stake ? ` · stake ${(c.stake * 100).toFixed(1)}%` : ''}</div></div>
+            <div className="price"><b>{fmtOdds(c.price)}</b><div className="muted">{BOOK_ABBR[c.book] || c.book}{c.tier === 'Longshot' ? ' · flat ¼ unit' : c.stake ? ` · stake ${(c.stake * 100).toFixed(1)}%` : ''}</div></div>
           </div> })}
         </>}
       </div>}

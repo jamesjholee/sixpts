@@ -54,10 +54,14 @@ def vs_market(b: pd.DataFrame, week: int) -> dict | None:
         if len(s): buckets.append(dict(bucket=lab, n=int(len(s)), model=round(float(s.p_model.mean()), 3), market=round(float(s.ip_best.mean()), 3), actual=round(float(s.scored.mean()), 3)))
     dec = m.best.map(lambda o: 1 + (o / 100 if o > 0 else 100 / -o))
     pnl_raw = np.where(m.scored == 1, dec - 1, -1.0)
-    sel_old = (edges >= .03); sel_new = ((m.p_bet - m.ip_best) >= .03)
+    from engine.select_picks import evaluate as _ev
+    sel_old = (edges >= .03)
+    # the shipped rule: every row through the real picks engine, Longshot tier only
+    tiers = [_ev(dict(r), int(bp), "", p_market=pmk)["tier"] for r, bp, pmk in zip(m.to_dict("records"), m.best, m.p_market)]
+    sel_new = pd.Series([t == "Longshot" for t in tiers], index=m.index)
     roi = lambda sel: dict(n=int(sel.sum()), units=round(float(pnl_raw[sel].sum()), 2), roi=round(float(pnl_raw[sel].mean()), 3) if sel.sum() else None, hit=round(float(m.scored[sel].mean()), 3) if sel.sum() else None, avg_price=int(m.best[sel].mean()) if sel.sum() else None)
     return dict(n=int(len(m)), model=sc(m.p_model.values), market=sc(m.p_market.values), blend=sc(m.p_bet.values),
-                edge_buckets=buckets, flat_bet_model_edge_3=roi(sel_old), flat_bet_blend_edge_3=roi(sel_new))
+                edge_buckets=buckets, flat_bet_model_edge_3=roi(sel_old), flat_bet_blend_edge_3=roi(sel_new), note="flat_bet_blend_edge_3 is the Longshot tier as shipped (engine.select_picks), flat 1u per pick")
 
 def main(season: int, week: int):
     f = D / f"board_w{week}_public.json"
@@ -105,7 +109,7 @@ def main(season: int, week: int):
         print(f"\nVs the market ({mk['n']} priced players): model AUC {mk['model']['auc']} · market AUC {mk['market']['auc']} · blend AUC {mk['blend']['auc']}")
         for e in mk["edge_buckets"]: print(f"  {e['bucket']:<20} n={e['n']:3d}  model {e['model']:.0%}  market {e['market']:.0%}  actual {e['actual']:.0%}")
         o, n2 = mk["flat_bet_model_edge_3"], mk["flat_bet_blend_edge_3"]
-        print(f"  flat-bet 3+ pts edge — model-vs-price: {o['n']} bets {o['units']:+.1f}u · blended: {n2['n']} bets {n2['units']:+.1f}u")
+        print(f"  flat-bet 3+ pts edge, model-vs-price: {o['n']} bets {o['units']:+.1f}u · Longshot tier as shipped: {n2['n']} bets {n2['units']:+.1f}u (1u each)")
     print(f"\nwrote {D / f'scorecard_w{week}.json'}")
 
 if __name__ == "__main__":

@@ -88,7 +88,7 @@ label{display:inline-flex;align-items:center;gap:6px;color:var(--dim)}
 .pick-row{display:grid;grid-template-columns:66px 1fr auto;gap:var(--s3);align-items:start;padding:11px 0;border-bottom:1px solid var(--line)}
 .pick-row:last-child{border-bottom:0}
 .tier{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:4px 0;text-align:center;border-radius:var(--r-sm)}
-.tier.bet{background:var(--bulb);color:var(--on-bulb)}
+.tier.bet,.tier.longshot{background:var(--bulb);color:var(--on-bulb)}
 .tier.lean{background:var(--bulb-dim);color:var(--bulb)}
 .tier.pass{background:var(--raise-2);color:var(--faint)}
 .pick-row .who{font-weight:600} .pick-row .why{color:var(--dim);margin-top:3px}

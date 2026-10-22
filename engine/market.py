@@ -18,7 +18,10 @@ scales down.
 from __future__ import annotations
 from collections import defaultdict
 
-MODEL_WEIGHT = {"high": 0.50, "medium": 0.35, "low": 0.20}   # share of the bet number that is ours
+# Fitted by log-loss on 2026 weeks 2-6 (1,367 priced player-games), shrunk a little toward 0.5. The sign surprised
+# us: on established starters the book is the better number (fit 0.1); on backups, rookies and committees our
+# red-zone usage model is (fit 0.9). Books price the top of the depth chart carefully and the bottom lazily.
+MODEL_WEIGHT = {"high": 0.25, "medium": 0.35, "low": 0.70}   # share of the bet number that is ours
 DEVIG_MIN, DEVIG_MAX = 0.70, 1.00                           # per-game scale on raw implied
 
 
