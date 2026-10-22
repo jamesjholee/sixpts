@@ -133,3 +133,22 @@ What did change (engine/market.py): the bet number is a certainty-weighted blend
 market, because on the one week with raw prices in the repo (W2) the model's ranking skill equals the book's
 (AUC .709 vs .715) and every bucket where we were above the market under-performed the market's number.
 The scorecard now reports model-vs-market every week.
+
+## Oct 22 2026 (later) — fitted blend weights and the Longshot tier
+
+Weeks 3–6 odds turned out to be Sunday-morning fetches (near closing), so the W2-only conclusion above was
+re-done on all five weeks (1,367 priced player-games, data/market_rows_w2_6.csv):
+
+- Blend weight fitted by log-loss: high-certainty 0.1, medium 0.3, low 0.9 (shipped as .25/.35/.70, shrunk toward
+  .5). Books price established starters better than we do; we price backups and committees better than they do.
+- The market is miscalibrated at long prices: +1500 and longer implies 4.5% and scores 12–15% (n=150). Betting every
+  active RB/WR/TE there wins in all five weeks. The model's selection roughly doubles the hit rate inside that pool
+  (18% vs 7%).
+- Tier backtest, flat 1u, near-closing best price (reconstructed, ±8%): old Bet/Lean rules lose (-4u / -21u);
+  Longshot rule (+1200..+4000, RB/WR/TE, blended edge ≥3, availability ok, some usage) 86 picks +232u, every week
+  positive, every leave-one-week-out split positive. TE best (+110u/32), QB excluded (-26u in the tail).
+- Shipped: Longshot / Lean / Pass. Lean is +150..+1200 with edge and signals, labelled research-only (break-even).
+  Favorites under +150 are always Pass. Longshot stake is a flat quarter unit; expect ~1 hit in 6.
+- Caveats: ~20 hits drive the result; books limit deep props; the Week 7 snapshot lists far more deep players than
+  earlier weeks did (cap at +4000 keeps it inside what was tested). Grade every Longshot pick; if the tier's hit rate
+  falls under 9% over 150 picks, the pocket has closed.

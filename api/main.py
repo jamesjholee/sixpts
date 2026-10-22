@@ -49,7 +49,7 @@ def evaluate_public(body: Evaluate):
     # one typed price is the only market signal we have: take ~8% hold off it before blending
     cards = [evaluate(board[k], int(v), "your book", p_market=_implied(int(v)) * 0.92) for k, v in body.prices.items() if k in board and v]
     cards = rank(cards)
-    return {"week": body.week, "priced": len(cards), "bets": [c for c in cards if c["tier"] == "Bet"], "leans": [c for c in cards if c["tier"] == "Lean"], "passes": [c for c in cards if c["tier"] == "Pass"], "unpriced_top": []}
+    return {"week": body.week, "priced": len(cards), "bets": [c for c in cards if c["tier"] == "Longshot"], "leans": [c for c in cards if c["tier"] == "Lean"], "passes": [c for c in cards if c["tier"] == "Pass"], "unpriced_top": []}
 
 @app.get("/api/private/board/{week}")
 def private_board(week: int, x_token: str = Header(default="")):
@@ -147,7 +147,7 @@ def model_picks(week: int, market: str = "anytime_td", x_token: str = Header(def
         cards.append(evaluate(r, o["price"] if o else None, o["book"] if o else "", p_market=mkt.get(f"{r['gsis_id']}|{r['game_id']}")))
     cards = rank(cards)
     n_priced = sum(1 for c in cards if c["tier"] != "No price")
-    return {"week": week, "market": market, "priced": n_priced, "bets": [c for c in cards if c["tier"] == "Bet"], "leans": [c for c in cards if c["tier"] == "Lean"],
+    return {"week": week, "market": market, "priced": n_priced, "bets": [c for c in cards if c["tier"] == "Longshot"], "leans": [c for c in cards if c["tier"] == "Lean"],
             "passes": [c for c in cards if c["tier"] == "Pass"], "unpriced_top": [c for c in cards if c["tier"] == "No price"][:15],
             "note": "The model only picks among players with a stored price. Enter prices on the board (they save when signed in) or connect an odds feed."}
 
