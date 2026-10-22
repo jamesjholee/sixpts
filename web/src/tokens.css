@@ -17,7 +17,7 @@
   /* text */
   --paint:#EEF2F6;
   --dim:#8794A5;
-  --faint:#5D6878;
+  --faint:#7A8799;   /* 4.9:1 on --surface: readable at 12px */
 
   /* brand */
   --bulb:#FFB020;
@@ -46,9 +46,12 @@
   --ease:cubic-bezier(.2,.8,.25,1);
 }
 
+/* Reduced motion keeps the information and drops the movement: nothing slides or sweeps,
+   but a price that moved still flashes and a touchdown still lands, as a static tint that fades. */
 @media (prefers-reduced-motion: reduce){
-  :root{ --quick:0ms; --settle:0ms; --tell:0ms; }
-  *,*::before,*::after{ animation-duration:.001ms !important; animation-iteration-count:1 !important; transition-duration:.001ms !important; }
+  :root{ --quick:0ms; --settle:0ms; }
+  @keyframes rise{ from{ opacity:1; transform:none } to{ opacity:1; transform:none } }
+  @keyframes sweep{ from{ background-position:0 0 } to{ background-position:0 0 } }
 }
 
 /* ---- the four motions the app is allowed to use ---- */
