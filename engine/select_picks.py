@@ -31,10 +31,13 @@ def implied(price: float) -> float:
 def decimal(price: float) -> float:
     return 1 + (price / 100 if price > 0 else 100 / -price)
 
-def evaluate(r: dict, price: float | None, book: str = "", p_market: float | None = None) -> dict:
+def evaluate(r: dict, price: float | None, book: str = "", p_market: float | None = None, fresh: bool = True) -> dict:
     """r: one board row (anytime_td). price: American odds or None.
     p_market: the devigged consensus probability for this player (engine.market). When given, the number we
-    bet on is a certainty-weighted blend of model and market; edge, EV and stake all use that blend."""
+    bet on is a certainty-weighted blend of model and market; edge, EV and stake all use that blend.
+    fresh: this player still had a price in the latest odds refresh. After the Sunday post-inactives fetch a
+    missing price means the books pulled his market, i.e. he is a healthy scratch; the Longshot tier needs
+    fresh=True (2026 week 6: 36 of 64 listed longshots were active-roster players who did not dress)."""
     p_raw = float(r["p_model"]); pos = r.get("position", "WR")
     p, w_model = _blend(p_raw, p_market, r.get("certainty_label"))
     flags = r.get("flags") or []
@@ -108,7 +111,8 @@ def evaluate(r: dict, price: float | None, book: str = "", p_market: float | Non
     # --- decision ---
     # the number has to rest on something: a recent touch, or red zone looks (backtest: this drops only losers)
     has_usage = float(r.get("touches_recent") or 0) >= 1 or (float(r.get("rz_tgt_pg") or 0) + float(r.get("rz_carry_pg") or 0)) >= 0.3
-    longshot_ok = pos in ("RB", "WR", "TE") and LONGSHOT_PRICE[0] <= price <= LONGSHOT_PRICE[1] and sig["availability"] and not falling and has_usage
+    longshot_ok = pos in ("RB", "WR", "TE") and LONGSHOT_PRICE[0] <= price <= LONGSHOT_PRICE[1] and sig["availability"] and not falling and has_usage and fresh
+    if not fresh: against.insert(0, "no price in the latest odds refresh — books pulled his market, likely inactive")
     if longshot_ok and edge >= MIN_EDGE["Longshot"]:
         tier = "Longshot"; stake = LONGSHOT_STAKE
         head = (f"Longshot {price:+d} ({book}). {us} vs book {ip:.0%}: +{edge*100:.1f} pts. "
@@ -125,6 +129,7 @@ def evaluate(r: dict, price: float | None, book: str = "", p_market: float | Non
 
     if tier == "Lean": head = f"Lean {price:+d} ({book}). {us} vs book {ip:.0%}: +{edge*100:.1f} pts, {greens}/{n} signals green. Research only: this price range has been break-even for us."
     elif price < LEAN_PRICE[0] and sig["availability"]: head = f"Pass at {price:+d}. The book prices favorites well; nothing to add at this price."
+    elif not fresh and pos in ("RB", "WR", "TE") and price >= LONGSHOT_PRICE[0]: head = f"Pass. Last price {price:+d} is from an earlier refresh; the books have since pulled his market, so he is probably inactive."
     elif longshot_ok and edge < MIN_EDGE["Longshot"]: head = f"Pass at {price:+d}. {us} vs book {ip:.0%}: not enough above the price to chase."
     elif edge < MIN_EDGE["Lean"]: head = f"Pass at {price:+d}. {us} vs book {ip:.0%}: no edge" + (f" — would need {int(r['fair_odds']):+d} or better." if p_market is None else ".")
     elif not sig["market_agrees"]: head = f"Pass at {price:+d}. We say {p_raw:.0%}, the books say {ip:.0%} — on this little usage the market is the better estimate."

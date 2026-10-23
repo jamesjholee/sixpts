@@ -21,6 +21,16 @@ def main(season, week):
     df = pd.read_parquet(D / f"upcoming_w{week}.parquet")
     df, _ = make_features(df)
     up = df[(df.season == season) & (df.week == week)].copy()
+    # roster status: anyone on IR/PUP, cut, retired or on the practice squad cannot score on Sunday. 2026 week 6:
+    # this removed 11 of 47 listed longshots who did not play and none of the 17 who did.
+    try:
+        from engine import ingest
+        ros = pd.read_parquet(ingest.nflverse_file(f"weekly_rosters/roster_weekly_{season}.parquet", force=True))
+        ros = ros[ros.week == ros.week.max()].drop_duplicates("gsis_id").set_index("gsis_id").status
+        bad = up.gsis_id.map(ros).isin(["INA", "RES", "CUT", "RET", "EXE", "DEV", "TRD"])
+        print(f"roster filter: dropping {int(bad.sum())} players not on an active roster"); up = up[~bad].copy()
+    except Exception as e:
+        print("roster status unavailable, keeping everyone:", e)
     X = up[FEATS]
     up["p_model"] = clf.predict_proba(X)[:, 1]
 

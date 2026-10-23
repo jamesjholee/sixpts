@@ -152,3 +152,15 @@ re-done on all five weeks (1,367 priced player-games, data/market_rows_w2_6.csv)
 - Caveats: ~20 hits drive the result; books limit deep props; the Week 7 snapshot lists far more deep players than
   earlier weeks did (cap at +4000 keeps it inside what was tested). Grade every Longshot pick; if the tier's hit rate
   falls under 9% over 150 picks, the pocket has closed.
+
+## Oct 23 2026 — why 47 of 64 week-6 longshots never played, and the fix
+
+The Sunday workflow starts 12:00 UTC and fetches odds as its last step, which landed at 11:23 ET: seven minutes
+before inactives post. So 41 of the 47 DNPs still carried a live price. Weekly roster status (nflverse) removes
+11 of the 47 (IR/PUP/practice squad) and none of the 17 who played; the other 36 were active-roster healthy
+scratches, which nothing published before 11:30 ET identifies.
+
+Shipped: (1) a second Sunday job at 12:10 ET that only refreshes odds, after inactives; books pull scratched
+players' markets, so "has a price in the latest refresh" becomes the activity check. (2) The Longshot tier needs
+that fresh price; a stale one is a Pass with the reason. (3) score_week drops INA/RES/CUT/RET/EXE/DEV/TRD players.
+Until the first post-inactives fetch each week the list is research; the 12:10 ET list is the bet list.

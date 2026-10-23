@@ -3,10 +3,28 @@ on:
   schedule:
     - cron: "0 11 * * 2"      # Tuesday 07:00 ET — grade last week, score next week
     - cron: "0 12 * * 4,6,0"  # Thu/Sat/Sun — rescore with the latest injury report + lines
+    - cron: "10 16 * * 0"     # Sunday 12:10 ET — odds only, AFTER the 11:30 ET inactives. Books pull scratched
+                              # players' markets, so this fetch is the activity check the Longshot tier keys on.
   workflow_dispatch:
     inputs: { week: { description: "NFL week", required: true } }
 jobs:
+  gameday-odds:
+    if: github.event.schedule == '10 16 * * 0'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r requirements.txt
+      - name: Refresh odds after inactives
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: |
+          WEEK=$(python -c "import datetime as d;print(max(1,(d.date.today()-d.date(2026,9,8)).days//7+1))")
+          if [ -n "$ODDS_API_KEY" ]; then python3 -m engine.odds_api --week $WEEK; fi
   run:
+    if: github.event.schedule != '10 16 * * 0'
     runs-on: ubuntu-latest
     permissions:
       contents: write
