@@ -141,10 +141,24 @@ def model_picks(week: int, market: str = "anytime_td", x_token: str = Header(def
         k = (g, ga)
         if k not in best or r["price"] > best[k]["price"]: best[k] = r
     mkt = market_for_week(rows, board)
+    # freshness: did this player have a price in the latest refresh batch? (within 3h of the week's newest row)
+    newest = max((r["fetched_at"] for r in rows), default=None)
+    last_seen = {}
+    for r in rows:
+        k = (r["gsis_id"], r["game_id"])
+        if k not in last_seen or r["fetched_at"] > last_seen[k]: last_seen[k] = r["fetched_at"]
+    def _ts(x):
+        from datetime import datetime, timezone
+        if isinstance(x, str): x = datetime.fromisoformat(x.replace("Z", "+00:00"))
+        return x if x.tzinfo else x.replace(tzinfo=timezone.utc)
+    def _fresh(k):
+        if newest is None or k not in last_seen: return True
+        try: return (_ts(newest) - _ts(last_seen[k])).total_seconds() < 3 * 3600
+        except Exception: return True
     cards = []
     for r in board:
-        o = best.get((r["gsis_id"], r["game_id"]))
-        cards.append(evaluate(r, o["price"] if o else None, o["book"] if o else "", p_market=mkt.get(f"{r['gsis_id']}|{r['game_id']}")))
+        k = (r["gsis_id"], r["game_id"]); o = best.get(k)
+        cards.append(evaluate(r, o["price"] if o else None, o["book"] if o else "", p_market=mkt.get(f"{r['gsis_id']}|{r['game_id']}"), fresh=_fresh(k)))
     cards = rank(cards)
     n_priced = sum(1 for c in cards if c["tier"] != "No price")
     return {"week": week, "market": market, "priced": n_priced, "bets": [c for c in cards if c["tier"] == "Longshot"], "leans": [c for c in cards if c["tier"] == "Lean"],
