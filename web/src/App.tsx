@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { API } from './api'
 import Games from './Games'
+import Sim from './Sim'
 import Record from './Record'
 import Landing from './Landing'
 import HowTo from './HowTo'
@@ -207,7 +208,7 @@ export default function App() {
     <div className="top">
       <a className="wordmark" onClick={() => go('home')} title="About SixPts" role="link" tabIndex={0}
          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') go('home') }}><i />SixPts</a>
-      <nav className="nav desk" aria-label="Sections">{[['board', 'Board'], ['games', 'Games'], ['record', 'Record']].map(([v, l]) => <button key={v} className={view === v ? 'on' : ''} aria-current={view === v ? 'page' : undefined} onClick={() => go(v)}>{l}</button>)}</nav>
+      <nav className="nav desk" aria-label="Sections">{[['board', 'Board'], ['games', 'Games'], ['sim', 'Sim'], ['record', 'Record']].map(([v, l]) => <button key={v} className={view === v ? 'on' : ''} aria-current={view === v ? 'page' : undefined} onClick={() => go(v)}>{l}</button>)}</nav>
       <div className="right">
         <div className="week"><button aria-label="Previous week" onClick={() => go(view, Math.max(1, week - 1))}>‹</button><span>{week ? `Wk ${week}` : 'Wk —'}</span><button aria-label="Next week" onClick={() => go(view, week + 1)}>›</button></div>
         <div className="settings-wrap">
@@ -233,7 +234,7 @@ export default function App() {
         </div>
       </div>
     </div>
-    <nav className="tabs" aria-label="Sections">{[['board', 'Board'], ['games', 'Games'], ['record', 'Record']].map(([v, l]) => <a key={v} href={`?view=${v}&week=${week}`} className={view === v ? 'on' : ''} aria-current={view === v ? 'page' : undefined} onClick={e => { e.preventDefault(); go(v) }}>{l}</a>)}</nav>
+    <nav className="tabs" aria-label="Sections">{[['board', 'Board'], ['games', 'Games'], ['sim', 'Sim'], ['record', 'Record']].map(([v, l]) => <a key={v} href={`?view=${v}&week=${week}`} className={view === v ? 'on' : ''} aria-current={view === v ? 'page' : undefined} onClick={e => { e.preventDefault(); go(v) }}>{l}</a>)}</nav>
     <div className="wrap">{body}</div>
     {toast && <div className={'toast' + (toast.warn ? ' warn' : '')} role="status">{toast.msg}</div>}</>)
 
@@ -246,6 +247,7 @@ export default function App() {
     </div>)}
   </div>{waking && <p className="waking" role="status"><i />Waking the server. The first visit of the day takes up to a minute; after that it's instant.</p>}</>)
   if (view === 'games') return shell(<Games week={week} season={data.season} />)
+  if (view === 'sim') return shell(<Sim week={week} />)
   if (view === 'record') return shell(<Record />)
 
   const nBook = Object.keys(books).length
