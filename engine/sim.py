@@ -29,7 +29,9 @@ YPC_RUSH = 4.35; FUMBLE_RUSH = 0.009; FUMBLE_REC = 0.012; FUMBLE_SACK = 0.09
 XP = 0.945; TWO_PT = 0.48
 FG = [(30, .985), (40, .935), (50, .80), (56, .64), (62, .35)]  # (max distance, make prob)
 PUNT_NET = 41.0
-HFA = 0.02                  # home field: +-2% efficiency, about 1.5 points
+HFA = 0.0                   # the market spread already prices home field; the sim adds none of its own
+STRENGTH = 0.3              # shrink of team offense x defense ratios toward league average (fitted W1-7: 1.0 gave margins 2x too wide)
+NUDGE = 0.01                # efficiency per point of market spread (fitted W1-7)                  # home field: +-2% efficiency, about 1.5 points
 SEC_PASS_C, SEC_PASS_I, SEC_RUN, SEC_SACK = 33, 6, 35, 33      # seconds off the clock incl. the following huddle
 SEC_KICK = 5
 POS_TGT_FALLBACK = {"WR": .55, "TE": .20, "RB": .20, "QB": .0, "FB": .05}
@@ -125,28 +127,29 @@ def _fg_prob(dist):
     return out
 
 def simulate(home: str, away: str, T: dict, PH: dict, PA: dict, spread: float, total: float, n: int = 5000, seed: int = 1, keep_log: bool = True,
-             pass_scale: float = 1.0, run_scale: float = 1.0, pace_scale: float = 1.0) -> dict:
+             pass_scale: float = 1.0, run_scale: float = 1.0, pace_scale: float = 1.0, strength: float = None, nudge: float = None, hfa: float = None) -> dict:
     """spread: home spread (negative = home favoured). total: market total. Both only nudge pace/strength a little
     toward the market (the sim is mostly usage-driven); the backtest decides how much."""
     rng = np.random.default_rng(seed)
+    strength = STRENGTH if strength is None else strength; nudge = NUDGE if nudge is None else nudge; hfa = HFA if hfa is None else hfa
     th, ta, lg = T[home], T[away], T["_league"]
     teams = [th, ta]; players = [PH, PA]
-    # strength: offense rate vs league x defense rate vs league
-    def eff(o, d, col): return (o["off"][col] / lg[col]) * (d["defn"][col] / lg[col])
+    # strength: offense rate vs league x defense rate vs league, shrunk toward 1 (a few games of rates overstate a team)
+    def eff(o, d, col): return 1 + strength * ((o["off"][col] / lg[col]) * (d["defn"][col] / lg[col]) - 1)
     comp = [min(.80, max(.50, lg["comp"] * eff(th, ta, "comp"))), min(.80, max(.50, lg["comp"] * eff(ta, th, "comp")))]
     pyd = [lg["pyd"] * eff(th, ta, "pyd"), lg["pyd"] * eff(ta, th, "pyd")]
     ryd = [lg["ryd"] * eff(th, ta, "ryd"), lg["ryd"] * eff(ta, th, "ryd")]
     sack = [lg["sack"] * eff(th, ta, "sack"), lg["sack"] * eff(ta, th, "sack")]
     intr = [0.85 * lg["int"] * eff(th, ta, "int"), 0.85 * lg["int"] * eff(ta, th, "int")]   # x0.85: the depth/3rd-and-long modifiers below average ~1.18
-    expl = [th["off"]["expl"] * (ta["defn"]["expl"] / lg["expl"]), ta["off"]["expl"] * (th["defn"]["expl"] / lg["expl"])]
+    expl = [lg["expl"] * eff(th, ta, "expl"), lg["expl"] * eff(ta, th, "expl")]
     npr = [th["off"]["np_"], ta["off"]["np_"]]; go4 = [th["off"]["go4"], ta["off"]["go4"]]
     # pace: seconds per snap so each team lands near its snaps/game; the market total nudges pace +-5%
     pace = (th["off"]["plays_pg"] + ta["off"]["plays_pg"]) / 2.0
     tempo = (3600.0 / (2 * pace)) / (3600.0 / (2 * lg["plays_pg"]))   # 1.0 = league average seconds per snap
     tempo *= np.clip(1 - 0.05 * (total - 45.0) / 10.0, 0.9, 1.1)
     # market spread nudges efficiency: each point of spread ~ 1% yards/play
-    adj = np.clip(-spread * 0.01, -0.12, 0.12); pyd[0] *= 1 + adj; ryd[0] *= 1 + adj; pyd[1] *= 1 - adj; ryd[1] *= 1 - adj
-    pyd[0] *= 1 + HFA; ryd[0] *= 1 + HFA; pyd[1] *= 1 - HFA; ryd[1] *= 1 - HFA                 # home field
+    adj = np.clip(-spread * nudge, -0.15, 0.15); pyd[0] *= 1 + adj; ryd[0] *= 1 + adj; pyd[1] *= 1 - adj; ryd[1] *= 1 - adj
+    pyd[0] *= 1 + hfa; ryd[0] *= 1 + hfa; pyd[1] *= 1 - hfa; ryd[1] *= 1 - hfa                 # home field
     pyd = [x * pass_scale for x in pyd]; ryd = [x * run_scale for x in ryd]; tempo *= pace_scale
     cum = [dict(tgt=np.cumsum(P["tgt"]), car=np.cumsum(P["car"]), rz_tgt=np.cumsum(P["rz_tgt"]), rz_car=np.cumsum(P["rz_car"])) for P in players]
     npl = [len(P["ids"]) for P in players]

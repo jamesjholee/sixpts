@@ -30,8 +30,6 @@ const lerp = (a: number, b: number, t: number) => a + (b - a) * t
 function rngFor(seed: number) { let a = seed >>> 0; const u = () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296 }; const n = (sd = 1) => sd * Math.sqrt(-2 * Math.log(1 - u() + 1e-12)) * Math.cos(2 * Math.PI * u()); return { u, n, pick: <T,>(xs: T[]) => xs[Math.floor(u() * xs.length)], range: (a: number, b: number) => a + (b - a) * u() } }
 const OFF = ['QB', 'RB', 'TE', 'WR1', 'WR2', 'WR3', 'OL1', 'OL2', 'OL3', 'OL4', 'OL5'], DEF = ['DL1', 'DL2', 'DL3', 'DL4', 'LB1', 'LB2', 'LB3', 'CB1', 'CB2', 'S1', 'S2']
 type P = [number, number]; type Move = (t: number) => P; type Ball = (t: number) => [number, number, number]
-const ACTION: Record<string, number> = { complete: .8, incomplete: .6, run: .72, sack: .7, int: 1.1, fumble: 1.05, punt: .85, 'field goal': .95, kneel: .35 }
-const SETUP = .28, HOLD: Record<string, number> = { TD: 1.5, 'FG good': .8, turnover: .6, 'FG miss': .6, downs: .6 }
 
 function choreograph(play: Play, nxt: Play | undefined, home: string, seed: number) {
   const R = rngFor(seed); const d = play.off === home ? 1 : -1
@@ -111,19 +109,30 @@ function choreograph(play: Play, nxt: Play | undefined, home: string, seed: numb
     moves[s] = t => { if (!carrier) return [x0 + (s.startsWith('DL') ? 1.5 * d : 0) * ease(t), y0]; const [bx, by] = ball(Math.max(0, t - lag)); const u = ease(t / (1 - lag * .5)); return [lerp(x0, bx + gap * d, u), lerp(y0, by, u)] }
   }
   for (const s of OFF) if (!moves[s]) { const [x0, y0] = off[s]; moves[s] = path([[0, x0, y0], [1, x0 + (typ !== 'sack' ? 1 : -1.5) * d, y0]]) }
-  return { off, de, moves, ball, carrier, d, los, end }
+  return { off, de, moves, ball, carrier, d, los, end, slot }
 }
 
-// ---- timeline: every play becomes [setup, action, hold] segments on one clock ----
-type Seg = { i: number; t0: number; setup: number; action: number; hold: number; qcard?: boolean }
+// ---- timeline: coin toss, kickoffs, plays, quarter cards on one clock (mirror of engine/replay.py PACE) ----
+const PACE: Record<string, number> = { setup: .7, read: .55, complete: 1.55, incomplete: 1.25, run: 1.45, sack: 1.25, int: 2.1, fumble: 1.9, punt: 1.9, 'field goal': 1.9, kneel: .8, kickoff: 2.3, toss: 4.2, qcard: 2.4, td: 2.4, score: 1.5, turnover: 1.5 }
+type Seg = { kind: 'toss' | 'kickoff' | 'play' | 'qcard'; i: number; t0: number; dur: number; setup: number; action: number; hold: number; q?: number }
 function timeline(plays: Play[], speed: number) {
-  const segs: Seg[] = []; let t = 0, q = 1
+  const segs: Seg[] = []; let t = 0, q = 1; const sp = speed
+  const add = (s: Omit<Seg, 't0'>) => { segs.push({ ...s, t0: t }); t += s.dur }
+  if (plays.length) add({ kind: 'toss', i: 0, dur: PACE.toss / sp, setup: 0, action: 0, hold: 0 })
   plays.forEach((p, i) => {
-    if (p.q !== q) { segs.push({ i, t0: t, setup: 0, action: 0, hold: 1.1, qcard: true }); t += 1.1; q = p.q }
-    const setup = SETUP / speed, action = (ACTION[p.type] ?? .7) / speed, hold = (HOLD[p.result] ?? .05) / Math.sqrt(speed)
-    segs.push({ i, t0: t, setup, action, hold }); t += setup + action + hold
+    const prev = i ? plays[i - 1] : null
+    if (p.q !== q) { add({ kind: 'qcard', i, dur: PACE.qcard / sp, setup: 0, action: 0, hold: 0, q }); q = p.q }
+    const kicked = i === 0 || (prev && ['TD', 'FG good'].includes(prev.result) && prev.off !== p.off) || (prev && prev.q === 2 && p.q === 3)
+    if (kicked) add({ kind: 'kickoff', i, dur: PACE.kickoff / sp, setup: 0, action: 0, hold: 0 })
+    const act = (PACE[p.type] ?? 1.3) / sp, hold = (p.result === 'TD' ? PACE.td : p.result === 'FG good' ? PACE.score : ['turnover', 'FG miss', 'downs'].includes(p.result) ? PACE.turnover : PACE.read) / sp
+    add({ kind: 'play', i, dur: PACE.setup / sp + act + hold, setup: PACE.setup / sp, action: act, hold })
   })
   return { segs, total: t }
+}
+function winProb(marginHome: number, secsLeft: number, spreadHome: number, possHome: boolean | null) {
+  const f = Math.max(secsLeft / 3600, .004); const mu = -spreadHome * f + (possHome === null ? 0 : possHome ? 1.4 : -1.4) * f
+  const z = (marginHome + mu) / (13.5 * Math.sqrt(f)); const erf = (x: number) => { const s = Math.sign(x); x = Math.abs(x); const t = 1 / (1 + .3275911 * x); const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - .284496736) * t + .254829592) * t * Math.exp(-x * x); return s * y }
+  return .5 * (1 + erf(z / Math.SQRT2))
 }
 
 const ordinal = (n: number) => `${n}${['th', 'st', 'nd', 'rd'][(n % 100 > 10 && n % 100 < 14) ? 0 : Math.min(n % 10, 4) % 4] || 'th'}`
@@ -148,16 +157,32 @@ function describe(p: Play, qb: Record<string, string>) {
 const situation = (p: Play, home: string, away: string) => { if (!p.down) return ''; const yl = p.from_yl; const side = yl <= 50 ? p.off : (p.off === away ? home : away); const mark = yl <= 50 ? yl : 100 - yl; return `${ordinal(p.down)} & ${p.dist >= 100 - yl ? 'Goal' : p.dist} · ${side} ${mark}` }
 
 // ---- the canvas player ----
+type Stats = { att: number; cmp: number; pyds: number; ptd: number; inter: number; rush: Record<string, { car: number; yds: number; td: number }>; recv: Record<string, { rec: number; yds: number; td: number }> }
+const blankStats = (): Stats => ({ att: 0, cmp: 0, pyds: 0, ptd: 0, inter: 0, rush: {}, recv: {} })
+function statsThrough(plays: Play[], n: number, home: string, away: string) {
+  const S: Record<string, Stats> = { [home]: blankStats(), [away]: blankStats() }
+  for (const p of plays.slice(0, n)) {
+    const s = S[p.off || '']; if (!s) continue; const who = p.player || '—'; const td = p.result === 'TD' ? 1 : 0
+    if (['complete', 'incomplete', 'int'].includes(p.type)) s.att++
+    if (p.type === 'complete') { s.cmp++; s.pyds += p.gain; s.ptd += td; const r = s.recv[who] ||= { rec: 0, yds: 0, td: 0 }; r.rec++; r.yds += p.gain; r.td += td }
+    if (p.type === 'int') s.inter++
+    if (p.type === 'run' || p.type === 'fumble') { const r = s.rush[who] ||= { car: 0, yds: 0, td: 0 }; r.car++; r.yds += p.gain; r.td += td }
+  }
+  return S
+}
+
 function Replay({ game, gid }: { game: Game; gid: string }) {
   const ref = useRef<HTMLCanvasElement>(null)
   const plays = useMemo(() => (game.log?.plays || []).filter(p => p.type !== 'final'), [game])
-  const [speed, setSpeed] = useState(1.6)
+  const [speed, setSpeed] = useState(1)
   const [playing, setPlaying] = useState(true)
   const [pos, setPos] = useState(0)       // seconds on the timeline
-  const [idx, setIdx] = useState(0)
+  const [idx, setIdx] = useState(0)       // current play index
+  const [done, setDone] = useState(0)     // plays fully finished (for the leader panels)
   const tl = useMemo(() => timeline(plays, speed), [plays, speed])
   const [ch, ca] = useMemo(() => teamColors(game.home, game.away), [game])
   const qb = useMemo(() => { const o: Record<string, string> = {}; for (const t of [game.home, game.away]) { const qs = game.players.filter(p => p.position === 'QB' && p.team === t); o[t] = qs.sort((a, b) => b.car - a.car)[0]?.player || 'QB' } return o }, [game])
+  const nick = (t: string) => TEAMS[t]?.[2] || t
   const chor = useRef<{ i: number; c: ReturnType<typeof choreograph> } | null>(null)
   const last = useRef<Record<string, P>>({}); const trail = useRef<P[]>([]); const cam = useRef(60); const flash = useRef<{ side: 'home' | 'away'; at: number } | null>(null)
   const reduced = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
@@ -176,94 +201,176 @@ function Replay({ game, gid }: { game: Game; gid: string }) {
     raf = requestAnimationFrame(step); return () => cancelAnimationFrame(raf)
   }, [playing, tl.total, reduced])
 
+  // current segment + derived state for the DOM parts
+  const seg = tl.segs.reduce((a, s) => pos >= s.t0 ? s : a, tl.segs[0])
+  const p = plays[seg?.i ?? 0]
+  const local = pos - (seg?.t0 ?? 0)
+  const inSetup = seg?.kind === 'play' && local < seg.setup
+  const t = seg?.kind === 'play' ? Math.min(1, Math.max(0, (local - seg.setup) / seg.action)) : 0
+  const finished = seg?.kind === 'play' && !inSetup && t >= 1
+  const doneCount = seg ? (seg.kind === 'play' ? seg.i + (finished ? 1 : 0) : seg.i) : 0
+  useEffect(() => { if (seg && seg.i !== idx) setIdx(seg.i) }, [seg?.i])
+  useEffect(() => { if (doneCount !== done) setDone(doneCount) }, [doneCount])
+  const stats = useMemo(() => statsThrough(plays, done, game.home, game.away), [plays, done, game])
+  const score: [number, number] = !p ? [0, 0] : (seg.kind === 'play' && finished) ? [p.score_home, p.score_away] : seg.i ? [plays[seg.i - 1].score_home, plays[seg.i - 1].score_away] : [0, 0]
+  const sit = p ? situation(p, game.home, game.away) : ''
+  const [sitDown, sitSpot] = sit ? sit.split(' · ') : ['', '']
+
   // draw
   useEffect(() => {
-    const cv = ref.current; if (!cv || !plays.length) return
-    const dpr = Math.min(2, window.devicePixelRatio || 1); const W = cv.clientWidth, vertical = W < 640; const H = vertical ? Math.round(W * 1.5) : Math.round(W * 0.5)
+    const cv = ref.current; if (!cv || !plays.length || !seg) return
+    const dpr = Math.min(2, window.devicePixelRatio || 1); const W = cv.clientWidth, vertical = W < 640; const H = vertical ? Math.round(W * 1.45) : Math.round(W * 0.52)
     if (cv.width !== W * dpr || cv.height !== H * dpr) { cv.width = W * dpr; cv.height = H * dpr }
     const c = cv.getContext('2d')!; c.setTransform(dpr, 0, 0, dpr, 0, 0)
-    const seg = tl.segs.reduce((a, s) => pos >= s.t0 ? s : a, tl.segs[0]); const p = plays[seg.i]; if (seg.i !== idx) setIdx(seg.i)
-    const prevScore: [number, number] = seg.i ? [plays[seg.i - 1].score_home, plays[seg.i - 1].score_away] : [0, 0]
-    // layout
-    const top = vertical ? 92 : 64, bottom = H - (vertical ? 74 : 56), margin = vertical ? 0 : 20
+    const top = vertical ? 100 : 72, bottom = H - 10, margin = vertical ? 0 : 16
     const s = vertical ? (W - 2 * margin) / FW : Math.min((W - 2 * margin) / 120, (bottom - top) / FW); const span = vertical ? (bottom - top) / s : 120
-    const px = (x: number, y: number): P => vertical ? [margin + y * s, (top + bottom) / 2 - (x - cam.current) * s] : [(W - 120 * s) / 2 + x * s, (top + bottom) / 2 - (y - FW / 2) * s]
+    let flip = false
+    const px = (x: number, y: number): P => vertical ? (flip ? [margin + (FW - y) * s, (top + bottom) / 2 + (x - cam.current) * s] : [margin + y * s, (top + bottom) / 2 - (x - cam.current) * s]) : [(W - 120 * s) / 2 + x * s, (top + bottom) / 2 - (y - FW / 2) * s]
     const clampCam = (x: number) => span < 120 ? Math.min(Math.max(x, span / 2), 120 - span / 2) : 60
-    if (!chor.current || chor.current.i !== seg.i) { chor.current = { i: seg.i, c: choreograph(p, plays[seg.i + 1], game.home, seg.i * 7919 + 17) }; trail.current = [] }
-    const K = chor.current.c; const local = pos - seg.t0
-    const inSetup = seg.qcard ? false : local < seg.setup; const t = seg.qcard ? 0 : Math.min(1, Math.max(0, (local - seg.setup) / seg.action)); const holdU = seg.qcard ? 0 : Math.max(0, (local - seg.setup - seg.action) / Math.max(seg.hold, .01))
-    const [bx, by, bh] = inSetup ? K.ball(0) : K.ball(t)
-    cam.current += (clampCam(inSetup ? K.los + 12 * K.d : bx + 6 * K.d) - cam.current) * 0.12
-    // background
+    const scale = s
+    // --- background + field
     c.fillStyle = '#070A0F'; c.fillRect(0, 0, W, H)
-    c.save(); c.beginPath(); c.rect(0, top, W, bottom - top); c.clip()
-    const rect = (xa: number, xb: number, fill: string) => { const a = px(xa, 0), b = px(xb, FW); c.fillStyle = fill; c.fillRect(Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1])) }
-    rect(0, 120, '#10201A'); for (let i = 10; i < 110; i += 10) if ((i / 10) % 2) rect(i, i + 10, 'rgba(255,255,255,.022)')
-    rect(0, 10, `#${TEAMS[game.home]?.[0] || '1E2836'}42`); rect(110, 120, `#${TEAMS[game.away]?.[0] || '1E2836'}42`)
-    c.lineWidth = Math.max(1, .12 * s); c.strokeStyle = 'rgba(255,255,255,.42)'
-    for (let yd = 10; yd <= 110; yd += 5) { const a = px(yd, 0), b = px(yd, FW); c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]); c.stroke() }
-    c.strokeStyle = 'rgba(255,255,255,.75)'; c.lineWidth = Math.max(1.5, .18 * s)
-    for (const yd of [10, 110]) { const a = px(yd, 0), b = px(yd, FW); c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]); c.stroke() }
-    c.fillStyle = 'rgba(255,255,255,.34)'; c.font = `800 ${2.6 * s}px Archivo, Inter, sans-serif`; c.textAlign = 'center'; c.textBaseline = 'middle'
-    for (let yd = 20; yd <= 100; yd += 10) { const n = yd <= 60 ? yd - 10 : 110 - yd; for (const [hy, flip] of [[12, false], [41.3, true]] as [number, boolean][]) { const [x, y] = px(yd, hy); c.save(); c.translate(x, y); c.rotate(vertical ? (flip ? Math.PI / 2 : -Math.PI / 2) : flip ? Math.PI : 0); c.fillText(String(n), 0, 0); c.restore() } }
-    c.font = `800 ${5 * s}px Archivo, Inter, sans-serif`; c.fillStyle = 'rgba(255,255,255,.5)'
-    for (const [xa, team] of [[5, game.home], [115, game.away]] as [number, string][]) { const [x, y] = px(xa, FW / 2); c.save(); c.translate(x, y); if (!vertical) c.rotate(xa < 60 ? Math.PI / 2 : -Math.PI / 2); c.fillText((TEAMS[team]?.[2] || team).toUpperCase(), 0, 0); c.restore() }
-    c.strokeStyle = '#FFB020'; c.lineWidth = Math.max(2, .22 * s); for (const yd of [0, 120]) { const a = px(yd, FW / 2 - 3.1), b = px(yd, FW / 2 + 3.1); c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]); c.stroke() }
-    // LOS / first down
-    const line = (x: number, col: string) => { const a = px(x, 0), b = px(x, FW); c.strokeStyle = col; c.lineWidth = Math.max(1.5, .16 * s); c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]); c.stroke() }
-    line(K.los, 'rgba(76,141,255,.75)'); if (p.down && p.dist < 100 - p.from_yl) line(K.los + p.dist * K.d, 'rgba(255,176,32,.8)')
-    // trail
-    if (K.carrier && !inSetup) { const cp = K.moves[K.carrier](t); if (t < 1) trail.current.push(cp); trail.current.slice(-14).forEach((q, j, arr) => { const [x, y] = px(q[0], q[1]); c.fillStyle = `rgba(255,176,32,${(j + 1) / arr.length * .45})`; c.beginPath(); c.arc(x, y, .4 * s, 0, 7); c.fill() }) }
-    // players
-    const form = { ...K.off, ...K.de }; const u = inSetup ? ease(local / seg.setup) : 1
-    for (const sl of [...OFF, ...DEF]) {
-      const target = inSetup ? form[sl] : K.moves[sl](t); const from = last.current[sl] || form[sl]
-      const x = inSetup ? lerp(from[0], target[0], u) : target[0], y = inSetup ? lerp(from[1], target[1], u) : target[1]
-      if (!inSetup) last.current[sl] = [x, y]
-      const offSide = OFF.includes(sl) === (p.off === game.home); const r = (sl.startsWith('OL') || sl.startsWith('DL') ? .66 : .78) * s * (vertical ? 1 : 1.15)
-      const [X, Y] = px(x, y); c.fillStyle = 'rgba(7,10,15,.45)'; c.beginPath(); c.arc(X, Y + r * .25, r, 0, 7); c.fill()
-      c.fillStyle = `#${offSide ? ch : ca}`; c.beginPath(); c.arc(X, Y, r, 0, 7); c.fill(); c.strokeStyle = 'rgba(255,255,255,.55)'; c.lineWidth = Math.max(1, r * .14); c.stroke()
-      if (!inSetup && sl === K.carrier && t > .12) { c.strokeStyle = '#FFB020'; c.lineWidth = Math.max(1.5, r * .22); c.beginPath(); c.arc(X, Y, r * 1.9, 0, 7); c.stroke() }
+    const drawField = () => {
+      c.save(); c.beginPath(); c.rect(0, top, W, bottom - top); c.clip()
+      const rect = (xa: number, xb: number, fill: string) => { const a = px(xa, 0), b = px(xb, FW); c.fillStyle = fill; c.fillRect(Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1])) }
+      rect(-3, 123, '#0B1511'); rect(0, 120, '#10201A'); for (let i = 10; i < 110; i += 10) if ((i / 10) % 2) rect(i, i + 10, 'rgba(255,255,255,.025)')
+      rect(0, 10, `#${TEAMS[game.home]?.[0] || '1E2836'}4D`); rect(110, 120, `#${TEAMS[game.away]?.[0] || '1E2836'}4D`)
+      const line = (x0: number, y0: number, x1: number, y1: number, col: string, w: number) => { const a = px(x0, y0), b = px(x1, y1); c.strokeStyle = col; c.lineWidth = w; c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]); c.stroke() }
+      for (let yd = 10; yd <= 110; yd += 5) line(yd, 0, yd, FW, 'rgba(255,255,255,.4)', Math.max(1, .11 * s))
+      for (let yd = 11; yd < 110; yd++) for (const hy of [.6, 23.6, 29, 52.7]) line(yd, hy, yd, hy + (hy < 26 ? .9 : -.9), 'rgba(255,255,255,.28)', 1)
+      for (const yd of [10, 110]) line(yd, 0, yd, FW, 'rgba(255,255,255,.8)', Math.max(1.5, .18 * s))
+      for (const yd of [0, 120]) line(yd, FW / 2 - 3.1, yd, FW / 2 + 3.1, '#FFB020', Math.max(2, .25 * s))
+      c.fillStyle = 'rgba(255,255,255,.34)'; c.font = `800 ${2.6 * s}px Archivo, Inter, sans-serif`; c.textAlign = 'center'; c.textBaseline = 'middle'
+      for (let yd = 20; yd <= 100; yd += 10) { const n = yd <= 60 ? yd - 10 : 110 - yd; for (const [hy, far] of [[41.3, false], [12, true]] as [number, boolean][]) { const [x, y] = px(yd, hy); c.save(); c.translate(x, y); c.rotate(vertical ? ((far ? Math.PI / 2 : -Math.PI / 2) * (flip ? -1 : 1)) : far ? Math.PI : 0); c.fillText(String(n), 0, 0); c.restore() } }
+      c.font = `800 ${5 * s}px Archivo, Inter, sans-serif`; c.fillStyle = 'rgba(255,255,255,.45)'
+      for (const [xa, team] of [[5, game.home], [115, game.away]] as [number, string][]) { const [x, y] = px(xa, FW / 2); c.save(); c.translate(x, y); if (!vertical) c.rotate(xa < 60 ? Math.PI / 2 : -Math.PI / 2); else if (flip) c.rotate(Math.PI); c.fillText(nick(team).toUpperCase(), 0, 0); c.restore() }
+      const [mx, my] = px(60, FW / 2); c.strokeStyle = 'rgba(255,176,32,.18)'; c.lineWidth = Math.max(1, .3 * s); c.beginPath(); c.arc(mx, my, 6 * s, 0, 7); c.stroke()
+      c.fillStyle = 'rgba(255,176,32,.22)'; c.font = `800 ${2.4 * s}px Archivo, Inter, sans-serif`; c.fillText('sixpts', mx, my)
+      c.restore()
     }
-    // ball
-    if (!(K.carrier && bh === 0 && t >= 1 && !inSetup)) { const [X, Y0] = px(bx, by); const Y = Y0 - bh * s * 1.6, r = .3 * s * (1 + .6 * bh); if (bh > 0) { c.fillStyle = 'rgba(7,10,15,.4)'; c.beginPath(); c.arc(X, Y0, .28 * s, 0, 7); c.fill() } c.fillStyle = '#B5642B'; c.beginPath(); c.arc(X, Y, r, 0, 7); c.fill(); c.strokeStyle = 'rgba(255,255,255,.8)'; c.lineWidth = Math.max(1, r * .2); c.stroke() }
-    // banner
-    const scoreNow: [number, number] = (t >= 1 && !inSetup) ? [p.score_home, p.score_away] : prevScore
-    if (t >= 1 && !inSetup && ['TD', 'FG good', 'turnover', 'FG miss'].includes(p.result)) {
-      const a = Math.min(1, holdU * 6) * (holdU < .8 ? 1 : Math.max(0, 1 - (holdU - .8) / .2)); const label = p.result === 'TD' ? 'TOUCHDOWN' : p.result === 'FG good' ? 'FIELD GOAL' : p.result === 'FG miss' ? 'NO GOOD' : 'TURNOVER'
-      c.font = `800 ${vertical ? 44 : 56}px Archivo, Inter, sans-serif`; const w = c.measureText(label).width; const y = (top + bottom) / 2 - (vertical ? 60 : 0)
-      c.fillStyle = `rgba(7,10,15,${.78 * a})`; c.fillRect(W / 2 - w / 2 - 18, y - 36, w + 36, 64); c.fillStyle = p.result === 'TD' || p.result === 'FG good' ? `rgba(255,176,32,${a})` : `rgba(242,85,90,${a})`; c.fillText(label, W / 2, y - 2)
+    const dot = (x: number, y: number, col: string, offense: boolean, carrier = false, name: string | null = null) => {
+      const [X, Y] = px(x, y); const r = .72 * scale * (vertical ? 1 : 1.1)
+      c.fillStyle = 'rgba(7,10,15,.45)'; c.beginPath(); c.arc(X, Y + r * .3, r * 1.05, 0, 7); c.fill()
+      if (offense) { c.fillStyle = `#${col}`; c.beginPath(); c.arc(X, Y, r, 0, 7); c.fill(); c.strokeStyle = 'rgba(255,255,255,.7)'; c.lineWidth = Math.max(1, r * .16); c.stroke() }
+      else { c.fillStyle = 'rgba(7,10,15,.85)'; c.beginPath(); c.arc(X, Y, r, 0, 7); c.fill(); c.strokeStyle = `#${col}`; c.lineWidth = Math.max(2, r * .36); c.beginPath(); c.arc(X, Y, r * .78, 0, 7); c.stroke() }
+      if (carrier) {
+        c.strokeStyle = '#FFB020'; c.lineWidth = Math.max(1.5, r * .2); c.beginPath(); c.arc(X, Y, r * 1.75, 0, 7); c.stroke()
+        if (name) { c.font = `700 ${Math.max(11, r * 1.05)}px Inter, sans-serif`; const w = c.measureText(name).width + r * 1.6; const rect = [X - w / 2, Y - r * 3.9, w, r * 1.9] as const; c.fillStyle = 'rgba(7,10,15,.86)'; c.beginPath(); c.roundRect(rect[0], rect[1], rect[2], rect[3], r * .5); c.fill(); c.strokeStyle = 'rgba(255,176,32,.9)'; c.lineWidth = 1.2; c.stroke(); c.fillStyle = '#EEF2F6'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(name, X, Y - r * 2.95) }
+      }
     }
-    if (seg.qcard) { c.fillStyle = 'rgba(7,10,15,.72)'; c.fillRect(0, top, W, bottom - top); c.fillStyle = '#FFB020'; c.font = `800 ${vertical ? 36 : 44}px Archivo, Inter, sans-serif`; c.fillText(plays[seg.i - 1].q === 2 ? 'HALFTIME' : `END OF ${ordinal(plays[seg.i - 1].q).toUpperCase()}`, W / 2, (top + bottom) / 2 - 20); c.fillStyle = '#EEF2F6'; c.font = `800 ${vertical ? 24 : 28}px Archivo, Inter, sans-serif`; c.fillText(`${game.away} ${prevScore[1]} · ${game.home} ${prevScore[0]}`, W / 2, (top + bottom) / 2 + 24) }
-    c.restore()
-    // scoreboard
-    if (t >= 1 && !inSetup && (p.score_home !== prevScore[0] || p.score_away !== prevScore[1]) && (!flash.current || flash.current.at !== seg.t0)) flash.current = { side: p.score_home !== prevScore[0] ? 'home' : 'away', at: seg.t0 }
+    const ball = (b: [number, number, number], path: P[] | null) => {
+      const [x, y, h] = b; const [X, Y0] = px(x, y)
+      if (path) { c.save(); c.setLineDash([5, 6]); c.strokeStyle = 'rgba(255,176,32,.55)'; c.lineWidth = 1.8; c.beginPath(); path.forEach((q, i) => i ? c.lineTo(q[0], q[1]) : c.moveTo(q[0], q[1])); c.stroke(); c.restore() }
+      if (h > 0) { c.fillStyle = 'rgba(7,10,15,.45)'; c.beginPath(); c.arc(X, Y0, .3 * scale, 0, 7); c.fill() }
+      const Y = Y0 - h * scale * 1.7, r = .32 * scale * (1 + .5 * h)
+      c.fillStyle = '#B5642B'; c.beginPath(); c.ellipse(X, Y, r * 1.25, r * .85, 0, 0, 7); c.fill(); c.strokeStyle = 'rgba(255,255,255,.85)'; c.lineWidth = Math.max(1, r * .22); c.stroke()
+    }
+    const flight = (bf: Ball, t0: number, t1: number): P[] => { const o: P[] = []; for (let k = 0; k <= 24; k++) { const tt = t0 + (t1 - t0) * k / 24; const [x, y, h] = bf(tt); const [X, Y] = px(x, y); o.push([X, Y - h * scale * 1.7]) } return o }
+    const d0 = p ? (p.off === game.home ? 1 : -1) : 1
+    // --- segments
+    if (seg.kind === 'toss') {
+      cam.current = 60; flip = false; drawField()
+      const u = local / seg.dur; const [X, Y] = px(60, FW / 2); const r = 7 * s * (vertical ? 1 : 1.2); const spin = Math.min(1, u / .6)
+      c.textAlign = 'center'; c.textBaseline = 'middle'
+      if (spin < 1) { const w = Math.abs(Math.cos(spin * Math.PI * 9)) * r; const lift = Math.sin(spin * Math.PI) * 6 * s; c.fillStyle = '#FFB020'; c.beginPath(); c.ellipse(X, Y - lift, Math.max(1, w), r, 0, 0, 7); c.fill(); c.fillStyle = '#EEF2F6'; c.font = `800 ${vertical ? 20 : 24}px Archivo, Inter, sans-serif`; c.fillText('COIN TOSS', W / 2, Y - lift - r - 22) }
+      else { const rcv = plays[0].off || game.home; c.fillStyle = '#FFB020'; c.beginPath(); c.arc(X, Y, r, 0, 7); c.fill(); c.fillStyle = '#0A0D12'; c.font = `800 ${r * .8}px Archivo, Inter, sans-serif`; c.fillText(rcv, X, Y); c.fillStyle = '#EEF2F6'; c.font = `800 ${vertical ? 22 : 26}px Archivo, Inter, sans-serif`; c.fillText(`${nick(rcv).toUpperCase()} WILL RECEIVE`, W / 2, Y + r + 30) }
+    } else if (seg.kind === 'kickoff') {
+      const rcv = p.off; const d = rcv === game.home ? 1 : -1; const kickX = d === 1 ? 75 : 45; const land = d === 1 ? 10 + p.from_yl : 110 - p.from_yl; const u = local / seg.dur
+      flip = vertical && d === -1; cam.current += (clampCam(lerp(kickX, land, ease(u))) - cam.current) * .25; drawField()
+      const tk = .18, tlnd = .72, cc = FW / 2
+      const bf: Ball = tt => tt < tk ? [kickX, cc, 0] : tt < tlnd ? [lerp(kickX, land, easeOut((tt - tk) / (tlnd - tk)) ** .9), lerp(cc, cc + 3, (tt - tk) / (tlnd - tk)), Math.sin(Math.PI * Math.min(1, (tt - tk) / (tlnd - tk))) * 2.6] : [land, cc + 3, 0]
+      const R = rngFor(seg.i * 131 + 7); const kcol = rcv === game.home ? ca : ch, rcol = rcv === game.home ? ch : ca
+      c.save(); c.beginPath(); c.rect(0, top, W, bottom - top); c.clip()
+      for (let i = 0; i < 11; i++) { const y0 = 4 + i * 4.6; const x0 = kickX - (i === 5 ? 3 : 1) * d; dot(lerp(x0, land - 4 * d + R.n(2), ease(Math.max(0, (u - tk) / (1 - tk)))), y0 + R.n(.3), kcol, false) }
+      for (let i = 0; i < 10; i++) { const y0 = 6 + i * 4.8; const x0 = land - 12 * d + R.n(3); dot(lerp(x0, land - 6 * d, ease(Math.max(0, (u - .5) / .5))), y0, rcol, true) }
+      dot(lerp(land - 2 * d, land, ease(Math.min(1, u / tlnd))), cc + 3, rcol, true, u > tlnd)
+      ball(bf(u), u >= tk && u < tlnd ? flight(bf, tk, tlnd) : null); c.restore()
+    } else if (seg.kind === 'qcard') {
+      cam.current = 60; flip = false; drawField()
+      c.fillStyle = 'rgba(7,10,15,.72)'; c.fillRect(0, top, W, bottom - top); c.textAlign = 'center'; c.textBaseline = 'middle'
+      c.fillStyle = '#FFB020'; c.font = `800 ${vertical ? 34 : 44}px Archivo, Inter, sans-serif`; c.fillText(seg.q === 2 ? 'HALFTIME' : `END OF ${ordinal(seg.q!).toUpperCase()}`, W / 2, (top + bottom) / 2 - 20)
+      c.fillStyle = '#EEF2F6'; c.font = `800 ${vertical ? 22 : 28}px Archivo, Inter, sans-serif`; c.fillText(`${game.away} ${score[1]} · ${game.home} ${score[0]}`, W / 2, (top + bottom) / 2 + 24)
+    } else {
+      if (!chor.current || chor.current.i !== seg.i) { chor.current = { i: seg.i, c: choreograph(p, plays[seg.i + 1], game.home, seg.i * 7919 + 17) }; trail.current = [] }
+      const K = chor.current.c; const d = K.d
+      const [bx, by, bh] = inSetup ? K.ball(0) : K.ball(t)
+      flip = vertical && d === -1
+      const tgt = clampCam(inSetup ? K.los + 10 * d : bx + 5 * d); cam.current = Math.abs(tgt - cam.current) < .3 ? tgt : cam.current + (tgt - cam.current) * .12
+      drawField()
+      c.save(); c.beginPath(); c.rect(0, top, W, bottom - top); c.clip()
+      const line = (x: number, col: string) => { const a = px(x, 0), b = px(x, FW); c.strokeStyle = col; c.lineWidth = Math.max(1.5, .16 * s); c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]); c.stroke() }
+      line(K.los, 'rgba(76,141,255,.8)'); if (p.down && p.dist < 100 - p.from_yl) line(K.los + p.dist * d, 'rgba(255,176,32,.85)')
+      let path: P[] | null = null
+      if (!inSetup && bh > 0) { let t0 = t, t1 = t; while (t0 > 0 && K.ball(t0 - .02)[2] > 0) t0 -= .02; while (t1 < 1 && K.ball(t1 + .02)[2] > 0) t1 += .02; path = flight(K.ball, Math.max(0, t0 - .02), Math.min(1, t1 + .02)) }
+      if (K.carrier && !inSetup) { const cp = K.moves[K.carrier](t); if (t < 1) trail.current.push(cp); trail.current.slice(-16).forEach((q, j, arr) => { const [x, y] = px(q[0], q[1]); c.fillStyle = `rgba(255,176,32,${(j + 1) / arr.length * .5})`; c.beginPath(); c.arc(x, y, .32 * s, 0, 7); c.fill() }) }
+      const form = { ...K.off, ...K.de }; const u = inSetup ? ease(local / seg.setup) : 1
+      const order = [...OFF, ...DEF].sort((a, b) => vertical ? (flip ? form[a][0] - form[b][0] : form[b][0] - form[a][0]) : form[a][1] - form[b][1])
+      for (const sl of order) {
+        const target = inSetup ? form[sl] : K.moves[sl](t); const from = last.current[sl] || form[sl]
+        const x = inSetup ? lerp(from[0], target[0], u) : target[0], y = inSetup ? lerp(from[1], target[1], u) : target[1]
+        if (!inSetup) last.current[sl] = [x, y]
+        const offSide = OFF.includes(sl) === (p.off === game.home); const isCar = !inSetup && sl === K.carrier && t > .12
+        const name = isCar ? (sl === K.slot && p.player ? short(p.player) : sl === 'QB' ? short(qb[p.off || '']) : p.type === 'int' ? 'INT' : null) : null
+        dot(x, y, offSide ? ch : ca, OFF.includes(sl), isCar, name)
+      }
+      if (!(K.carrier && bh === 0 && t >= 1 && !inSetup)) ball([bx, by, bh], path)
+      c.restore()
+      const prevScore: [number, number] = seg.i ? [plays[seg.i - 1].score_home, plays[seg.i - 1].score_away] : [0, 0]
+      if (finished && (p.score_home !== prevScore[0] || p.score_away !== prevScore[1]) && (!flash.current || flash.current.at !== seg.t0)) flash.current = { side: p.score_home !== prevScore[0] ? 'home' : 'away', at: seg.t0 }
+      if (finished && ['TD', 'FG good', 'turnover', 'FG miss'].includes(p.result)) {
+        const hu = Math.max(0, (local - seg.setup - seg.action) / Math.max(seg.hold, .01)); const a = Math.min(1, hu * 6) * (hu < .8 ? 1 : Math.max(0, 1 - (hu - .8) / .2))
+        const label = p.result === 'TD' ? 'TOUCHDOWN' : p.result === 'FG good' ? 'FIELD GOAL' : p.result === 'FG miss' ? 'NO GOOD' : 'TURNOVER'
+        c.font = `800 ${vertical ? 40 : 54}px Archivo, Inter, sans-serif`; c.textAlign = 'center'; c.textBaseline = 'middle'; const w = c.measureText(label).width; const y = (top + bottom) / 2 - (vertical ? 60 : 0)
+        c.fillStyle = `rgba(7,10,15,${.78 * a})`; c.fillRect(W / 2 - w / 2 - 18, y - 34, w + 36, 68); c.fillStyle = p.result === 'TD' || p.result === 'FG good' ? `rgba(255,176,32,${a})` : `rgba(242,85,90,${a})`; c.fillText(label, W / 2, y)
+      }
+    }
+    // --- scoreboard + win probability
+    const secsLeft = p ? ((p.q <= 4 ? (4 - Math.min(p.q, 4)) * 900 : 0) + p.clock) : 3600
+    const wp = winProb(score[0] - score[1], secsLeft - (inSetup ? 0 : 20), game.spread, seg.kind === 'play' || seg.kind === 'kickoff' ? p.off === game.home : null)
     const sb = (x: number, team: string, sc: number, col: string, side: 'home' | 'away') => {
-      c.textAlign = 'center'; c.fillStyle = '#EEF2F6'; c.font = `800 ${vertical ? 16 : 15}px Archivo, Inter, sans-serif`; c.fillText(team, x, vertical ? 24 : 18)
-      const fl = flash.current?.side === side && pos - flash.current.at < 2.2 && pos - seg.t0 > seg.setup + seg.action
-      c.fillStyle = fl ? '#FFC247' : '#EEF2F6'; c.font = `800 ${vertical ? 38 : 30}px Archivo, Inter, sans-serif`; c.fillText(String(sc), x, vertical ? 62 : 46)
-      c.fillStyle = `#${col}`; c.fillRect(x - 22, vertical ? 80 : 58, 44, 3)
-      if (p.off === team && !seg.qcard) { c.fillStyle = '#FFB020'; c.beginPath(); c.arc(x + (side === 'away' ? -40 : 40), vertical ? 58 : 42, 4, 0, 7); c.fill() }
+      c.textAlign = 'center'; c.textBaseline = 'alphabetic'; c.fillStyle = '#EEF2F6'; c.font = `800 ${vertical ? 16 : 16}px Archivo, Inter, sans-serif`; c.fillText(team, x, 22)
+      c.fillStyle = '#8794A5'; c.font = `600 ${vertical ? 10 : 11}px Inter, sans-serif`; c.fillText(nick(team), x, 36)
+      const fl = flash.current?.side === side && pos - flash.current.at < 2.2 && finished
+      c.fillStyle = fl ? '#FFC247' : '#EEF2F6'; c.font = `800 ${vertical ? 34 : 32}px Archivo, Inter, sans-serif`; c.fillText(String(sc), x + (side === 'away' ? 70 : -70) * (vertical ? 1 : 1.4), 42)
+      c.fillStyle = `#${col}`; c.fillRect(x - 24, 48, 48, 3)
+      if (seg.kind === 'play' && p.off === team) { c.fillStyle = '#FFB020'; c.beginPath(); c.arc(x + (side === 'away' ? 28 : -28), 17, 4, 0, 7); c.fill() }
     }
-    sb(vertical ? 70 : 110, game.away, scoreNow[1], ca, 'away'); sb(W - (vertical ? 70 : 110), game.home, scoreNow[0], ch, 'home')
-    c.fillStyle = '#8794A5'; c.font = `600 ${vertical ? 12 : 12}px Inter, sans-serif`; c.fillText(p.q > 4 ? 'OT' : `${ordinal(p.q)} QTR`, W / 2, vertical ? 20 : 16)
-    c.fillStyle = '#EEF2F6'; c.font = `800 ${vertical ? 24 : 22}px Archivo, Inter, sans-serif`; c.fillText(clock(p.clock), W / 2, vertical ? 46 : 38)
-    c.fillStyle = '#FFB020'; c.font = `600 ${vertical ? 12 : 12}px Inter, sans-serif`; c.fillText(situation(p, game.home, game.away), W / 2, vertical ? 70 : 56)
-    // caption
-    const done = t > .5 && !inSetup; const line1 = done ? describe(p, qb) : situation(p, game.home, game.away); const colr = done ? (['TD', 'FG good'].includes(p.result) ? '#FFB020' : ['turnover', 'FG miss', 'downs'].includes(p.result) ? '#F2555A' : '#EEF2F6') : '#8794A5'
-    c.textAlign = 'left'; c.fillStyle = colr; c.font = `800 ${vertical ? 17 : 20}px Archivo, Inter, sans-serif`; c.fillText(line1, margin + 12, bottom + (vertical ? 24 : 24), W - 2 * margin - 24)
-    c.fillStyle = '#8794A5'; c.font = `500 ${vertical ? 12 : 13}px Inter, sans-serif`; c.fillText(`${p.q > 4 ? 'OT' : 'Q' + p.q} ${clock(p.clock)} · play ${seg.i + 1} of ${plays.length}`, margin + 12, bottom + (vertical ? 46 : 46))
-  }, [pos, plays, tl, game, ch, ca, qb, idx])
+    sb(vertical ? 46 : 150, game.away, score[1], ca, 'away'); sb(W - (vertical ? 46 : 150), game.home, score[0], ch, 'home')
+    c.textAlign = 'center'; c.fillStyle = '#8794A5'; c.font = `600 11px Inter, sans-serif`; c.fillText(!p ? 'Q1' : p.q > 4 ? 'OT' : `Q${seg.kind === 'qcard' ? seg.q : p.q}`, W / 2, 16)
+    c.fillStyle = '#EEF2F6'; c.font = `800 ${vertical ? 22 : 24}px Archivo, Inter, sans-serif`; c.fillText(seg.kind === 'toss' ? '15:00' : seg.kind === 'qcard' ? '0:00' : clock(p.clock), W / 2, 40)
+    if (seg.kind === 'play') { c.fillStyle = '#FFB020'; c.font = `600 11px Inter, sans-serif`; c.fillText(sit, W / 2, 56) }
+    const bw = Math.min(W - 160, 520), bx0 = (W - bw) / 2, by0 = vertical ? 76 : 60
+    c.fillStyle = '#2B3949'; c.fillRect(bx0, by0, bw, 6); c.fillStyle = `#${ca}`; c.fillRect(bx0, by0, bw * (1 - wp), 6); c.fillStyle = `#${ch}`; c.fillRect(bx0 + bw * (1 - wp), by0, bw * wp, 6)
+    const mk = bx0 + bw * (1 - wp); c.fillStyle = '#070A0F'; c.beginPath(); c.arc(mk, by0 + 3, 7, 0, 7); c.fill(); c.strokeStyle = '#FFB020'; c.lineWidth = 2.5; c.stroke()
+    c.font = `800 13px Archivo, Inter, sans-serif`; c.textBaseline = 'middle'; c.fillStyle = `#${ca}`; c.textAlign = 'right'; c.fillText(`${Math.round((1 - wp) * 100)}%`, bx0 - 10, by0 + 3); c.fillStyle = `#${ch}`; c.textAlign = 'left'; c.fillText(`${Math.round(wp * 100)}%`, bx0 + bw + 10, by0 + 3)
+  }, [pos, plays, tl, game, ch, ca, qb, seg, finished, score, inSetup, t, local, sit])
 
   if (!plays.length) return <p className="empty">No play log for this game.</p>
-  const jump = (i: number) => { const sg = tl.segs.find(x => x.i === i && !x.qcard); if (sg) { setPos(sg.t0); chor.current = null } }
+  const jump = (i: number) => { const sg = tl.segs.find(x => x.i === i && x.kind === 'play'); if (sg) { setPos(sg.t0); chor.current = null } }
+  const lineText = seg.kind === 'toss' ? `${game.away} @ ${game.home} · ${game.n.toLocaleString()} simulated games · this is the median one` : seg.kind === 'kickoff' ? `${nick(p.off || '')} start at the ${p.from_yl <= 50 ? p.from_yl : 100 - p.from_yl}` : seg.kind === 'qcard' ? '' : (inSetup || t < .55) ? '…' : describe(p, qb)
+  const lineColr = seg.kind === 'play' && !inSetup && t >= .55 ? (['TD', 'FG good'].includes(p.result) ? 'pos' : ['turnover', 'FG miss', 'downs'].includes(p.result) ? 'neg' : '') : 'muted'
+  const upcoming = seg.kind !== 'play' || inSetup || t < .55
+  const panel = (team: string, col: string) => { const S = stats[team]; const ru = Object.entries(S.rush).sort((a, b) => b[1].yds - a[1].yds)[0]; const re = Object.entries(S.recv).sort((a, b) => b[1].yds - a[1].yds)[0]
+    return <div className="sim-panel" key={team} style={{ borderTopColor: `#${col}` }}>
+      <b>{nick(team).toUpperCase()}</b>
+      <div className="sim-row"><span className="sim-l">Passing</span><span>{short(qb[team])}</span><span className="muted">{S.cmp}/{S.att} · {S.pyds} yds{S.ptd ? ` · ${S.ptd} TD` : ''}{S.inter ? ` · ${S.inter} INT` : ''}</span></div>
+      <div className="sim-row"><span className="sim-l">Rushing</span><span>{ru ? short(ru[0]) : '—'}</span><span className="muted">{ru ? `${ru[1].car} car · ${ru[1].yds} yds${ru[1].td ? ` · ${ru[1].td} TD` : ''}` : ''}</span></div>
+      <div className="sim-row"><span className="sim-l">Receiving</span><span>{re ? short(re[0]) : '—'}</span><span className="muted">{re ? `${re[1].rec} rec · ${re[1].yds} yds${re[1].td ? ` · ${re[1].td} TD` : ''}` : ''}</span></div>
+    </div> }
   return (<div className="sim-player">
     <canvas ref={ref} className="sim-canvas" style={{ width: '100%', display: 'block' }} aria-label={`Replay of the median simulated ${game.away} at ${game.home} game`} />
+    <div className="sim-last">
+      <span className="chip">{upcoming ? 'NEXT SNAP' : 'LAST PLAY'}</span>
+      <span className="sim-down">{seg.kind === 'play' ? sitDown.toUpperCase() : seg.kind === 'kickoff' || seg.kind === 'toss' ? 'KICKOFF' : `END Q${seg.q}`}</span>
+      <span className="muted">{seg.kind === 'play' ? sitSpot : seg.kind === 'toss' ? `${nick(plays[0].off || '')} will receive` : seg.kind === 'kickoff' ? `${nick(p.off || '')} receive` : ''}</span>
+      <span className={'sim-line ' + lineColr}>{lineText}</span>
+    </div>
     <div className="sim-controls">
       <button className="btn" onClick={() => { if (pos >= tl.total) { setPos(0); chor.current = null; last.current = {} } setPlaying(!playing) }} aria-label={playing ? 'Pause' : 'Play'}>{playing ? '❚❚' : pos >= tl.total ? '↺' : '▶'}</button>
       <input type="range" min={0} max={tl.total} step={0.05} value={pos} onChange={e => { setPos(+e.target.value); chor.current = null }} aria-label="Scrub the replay" />
-      <div className="seg">{[1, 1.6, 2.5].map(x => <button key={x} className={speed === x ? 'on' : ''} onClick={() => setSpeed(x)}>{x}×</button>)}</div>
+      <div className="seg">{[1, 1.5, 2.5].map(x => <button key={x} className={speed === x ? 'on' : ''} onClick={() => setSpeed(x)}>{x}×</button>)}</div>
     </div>
+    <div className="sim-panels">{panel(game.away, ca)}{panel(game.home, ch)}</div>
     <ol className="sim-log" aria-label="Play by play" ref={logRef}>
       {plays.map((q, i) => <li key={i} className={i === idx ? 'on' : ''} onClick={() => jump(i)} style={{ cursor: 'pointer' }}><span className="muted">{q.q > 4 ? 'OT' : 'Q' + q.q} {clock(q.clock)}</span> <span className={['TD', 'FG good'].includes(q.result) ? 'pos' : ['turnover', 'FG miss', 'downs'].includes(q.result) ? 'neg' : ''}>{describe(q, qb)}</span> <span className="muted">{q.score_away}–{q.score_home}</span></li>)}
     </ol>
@@ -272,10 +379,10 @@ function Replay({ game, gid }: { game: Game; gid: string }) {
 }
 
 export default function Sim({ week }: { week: number }) {
-  const [list, setList] = useState<Record<string, Game> | null>(null); const [err, setErr] = useState(''); const [note, setNote] = useState('')
+  const [list, setList] = useState<Record<string, Game> | null>(null); const [err, setErr] = useState(''); const [note, setNote] = useState(''); const [sheets, setSheets] = useState<string[]>([])
   const [sel, setSel] = useState<string>(() => new URLSearchParams(location.search).get('game') || '')
   const [full, setFull] = useState<Game | null>(null)
-  useEffect(() => { setList(null); setErr(''); fetch(`${API}/api/sim/${week}`).then(async r => { if (!r.ok) throw new Error(`No simulations for week ${week} yet — they're built with the Tuesday board.`); return r.json() }).then(d => { setList(d.games); setNote(d.note || '') }).catch(e => setErr(e.message)) }, [week])
+  useEffect(() => { setList(null); setErr(''); fetch(`${API}/api/sim/${week}`).then(async r => { if (!r.ok) throw new Error(`No simulations for week ${week} yet — they're built with the Tuesday board.`); return r.json() }).then(d => { setList(d.games); setNote(d.note || ''); setSheets(d.cheatsheets || []) }).catch(e => setErr(e.message)) }, [week])
   const gid = list ? (sel && list[sel] ? sel : Object.keys(list)[0]) : ''
   useEffect(() => { if (!gid) return; setFull(null); fetch(`${API}/api/sim/${week}/${gid}`).then(r => r.json()).then(d => setFull(d.game)).catch(() => {}) }, [week, gid])
   if (err) return <p className="empty">{err}</p>
@@ -283,6 +390,7 @@ export default function Sim({ week }: { week: number }) {
   const g = list[gid]; const top = [...g.players].sort((a, b) => b.p_td - a.p_td).slice(0, 10)
   const fav = g.spread < 0 ? `${g.home} ${g.spread}` : g.spread > 0 ? `${g.away} −${g.spread}` : 'pick'
   return (<div>
+    {sheets.length > 0 && <p className="muted" style={{ margin: '0 0 8px', fontSize: 13 }}>Week {week} cheat sheet (every offense's top-10 ranks, every defense's most/fewest allowed): {sheets.map((u, i) => <a key={u} href={u} target="_blank" rel="noreferrer" style={{ marginRight: 8 }}>page {i + 1} ↗</a>)}</p>}
     <div className="games">{Object.entries(list).map(([id, x]) => <button key={id} className={'game' + (gid === id ? ' on' : '')} aria-pressed={gid === id} onClick={() => setSel(id)}><b>{x.away} @ {x.home}</b><small>{x.home} {pc(x.p_home)} · {Math.round(x.median_away)}–{Math.round(x.median_home)}</small></button>)}</div>
     <div className="bar"><h1>{g.away} @ {g.home}</h1><span className="muted">{fav} · O/U {g.total}</span>
       {g.replay?.['9x16'] && <a className="btn" style={{ marginLeft: 'auto' }} href={g.replay['9x16']} download>Download for social ↓</a>}</div>

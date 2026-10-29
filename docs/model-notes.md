@@ -213,3 +213,44 @@ The Tuesday workflow renders every game 9x16 in a `replays` job after the board 
 as assets of a `replays-w{N}` GitHub release (videos never enter the repo); `data/replays_w{N}.json` carries
 the URLs, `/api/sim/{week}` attaches them per game, and the Games view links "Watch the sim". The median-game
 picker now skips ties (a 19–19 "median game" made a poor video).
+
+## Sim calibration fix + broadcast-style replays + cheat sheet (week 8)
+
+**Bug.** The public board stores `spread` as *positive = favoured* (CIN 10.0 means the Bengals are 10-point
+favourites); the simulator takes the standard sign (negative = home favoured). `sim_week`, `sim_backtest` and the
+new cheat sheet now negate at the call site. Until this fix the market nudge pushed the wrong team and the cover
+percentages were mirrored. Re-running the W1–7 backtest with the right sign exposed a second problem: with the
+market in the right direction the sim's margins had a standard deviation of 11.3 against the market's 5.0 and the
+sim correlated only 0.15 with actual margins on its own — a few games of team rates overstate a team.
+
+**Fix.** Three knobs, fitted on W1–7 (n=500 grid, confirmed at n=1,500):
+`STRENGTH = 0.3` (offense×defense ratios shrunk 70% toward league average), `NUDGE = 0.01` per point of spread,
+`HFA = 0` (the spread already prices home field).
+
+| W1–7, n=1,500 | before (wrong sign, strength 1) | after |
+|---|---|---|
+| margin MAE sim / market | 10.8 / 12.1 (market computed with the wrong sign too) | 9.9 / 9.4 |
+| sim margin sd / corr with actual | 11.3 / 0.21 | 6.3 / 0.29 |
+| home-win Brier | 0.271 | 0.236 |
+| sim home % (actual 48.6) | 56.9 | 53.4 |
+| TD AUC sim / gbm / blend | .668 / .689 / .685 | .680 / .690 / .693 |
+
+The sim still trails the market on margins (as it should: the market is an input) and ties the gbm on scorers;
+it stays display-only. The blend now edges the gbm by .003 AUC, which is noise at 1,921 player-games; revisit at
+mid-season.
+
+**Replays (engine/replay.py, rebuilt).** Broadcast-style: coin toss, kickoff flights between drives, a perspective
+field painted once as a texture and projected through the camera (16x9 sideline, 9x16 end-zone camera that pans
+and turns so the offence always drives up), the ball's arc drawn as a dotted path, the carrier ringed and tagged by
+name, live leader panels (QB line, top rusher, top receiver), a win-probability bar (normal approximation on the
+remaining margin, market pregame expectation shrinking with the clock, +1.4 pts for possession), LAST PLAY /
+NEXT SNAP block, quarter cards and an outro. Offence dots are filled, defence dots are rings, so the sides read apart
+even when the colours are close. Pace ≈ 2.8 s a snap (`--speed` to change); a game runs 6–7 minutes, ~5 min to
+render. The Tuesday workflow renders one game per runner and publishes everything to the `replays-w{N}` release.
+
+**Cheat sheet (engine/cheatsheet.py).** Per game: each offense's top-10 ranks and each defense's top-10 most /
+fewest allowed across points, total/pass/rush yards, pass/rush TD and QB/RB/WR/TE PPR fantasy points per game,
+from nflverse play-by-play through the previous week. Four games a page, 1600×2000 PNG, published with the
+replays; `/api/sim/{week}` lists the pages and the Sim tab links them. Spot-checked against a published
+third-party sheet for week 8: yardage, points and TD figures match to the decimal; fantasy columns differ only by
+scoring format.

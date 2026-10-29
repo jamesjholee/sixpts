@@ -32,7 +32,7 @@ def main(season: int, week: int, n: int):
         gid = g["game"]; away, home = gid.split("_")[2], gid.split("_")[3]
         r_home = next((r for r in rows if r["game_id"] == gid and r["team"] == home), None)
         if r_home is None: continue
-        spread, total = float(r_home["spread"]), float(g["total"])
+        spread, total = -float(r_home["spread"]), float(g["total"])   # board stores + = favoured; the sim takes the standard sign (- = home favoured)
         PH = sim.player_inputs(feat, home, names); PA = sim.player_inputs(feat, away, names)
         if not PH["ids"] or not PA["ids"]: print(f"skip {gid}: no players"); continue
         out = sim.simulate(home, away, T, PH, PA, spread, total, n=n, seed=season * 1000 + week * 50 + i, keep_log=True)
