@@ -165,6 +165,24 @@ def model_picks(week: int, market: str = "anytime_td", x_token: str = Header(def
             "passes": [c for c in cards if c["tier"] == "Pass"], "unpriced_top": [c for c in cards if c["tier"] == "No price"][:15],
             "note": "The model only picks among players with a stored price. Enter prices on the board (they save when signed in) or connect an odds feed."}
 
+def _sim(week: int):
+    f = DATA / f"sim_w{week}.json"
+    if not f.exists(): raise HTTPException(404, detail={"message": f"No simulations for week {week} yet."})
+    return json.load(open(f))
+
+@app.get("/api/sim/{week}")
+def sim_week(week: int):
+    """Every game on the slate: outcome probabilities, quantiles, per-player distributions. No play logs (see /api/sim/{week}/{game_id})."""
+    d = _sim(week)
+    return {**{k: v for k, v in d.items() if k != "games"}, "games": {g: {k: v for k, v in s.items() if k != "log"} for g, s in d["games"].items()}}
+
+@app.get("/api/sim/{week}/{game_id}")
+def sim_game(week: int, game_id: str):
+    """One game with the play-by-play of the simulated game nearest the median score (for the replay)."""
+    d = _sim(week)
+    if game_id not in d["games"]: raise HTTPException(404, detail={"message": f"{game_id} is not on the week {week} slate."})
+    return {**{k: v for k, v in d.items() if k != "games"}, "game": d["games"][game_id]}
+
 @app.get("/api/market/{week}")
 def market_probs(week: int, market: str = "anytime_td", x_token: str = Header(default=""), authorization: str = Header(default="")):
     """Devigged consensus probability per player, from every stored book price (engine.market).

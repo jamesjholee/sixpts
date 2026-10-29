@@ -164,3 +164,35 @@ Shipped: (1) a second Sunday job at 12:10 ET that only refreshes odds, after ina
 players' markets, so "has a price in the latest refresh" becomes the activity check. (2) The Longshot tier needs
 that fresh price; a stale one is a Pass with the reason. (3) score_week drops INA/RES/CUT/RET/EXE/DEV/TRD players.
 Until the first post-inactives fetch each week the list is research; the 12:10 ET list is the bet list.
+
+## Simulator, part 1 (display-only) — added week 8
+
+`engine/sim.py` plays each game snap by snap, 5,000 times, vectorised across games. Inputs are nflverse only:
+team pass/run rates, completion, sack, interception and yards-per-play mixtures blended prior/current season
+(w = g/(g+4)); player target, carry and red-zone shares from the same `_std`/`_prev` feature columns the gbm uses
+(w = g/(g+2)); the market spread nudges efficiency ±1%/pt (cap 12%) and the total nudges pace ±5%; HFA 0.02.
+Pre-snap 4th-down decisions, a 45-yd FG table, 41-yd net punts. `engine/sim_week.py` writes `data/sim_w{N}.json`
+(outcome probabilities, quantiles, per-player P(TD)/P(2+TD)/receptions/yards, QB lines, and the play log of the
+simulated game nearest the median score, carrying renderer-ready fields for the replay). The weekly workflow
+runs it after `score_week`; `/api/sim/{week}` serves summaries and `/api/sim/{week}/{game_id}` one game with its log.
+
+**Walk-forward backtest, 2026 weeks 1–7, n=1,500 per game** (`python3 -m engine.sim_backtest --weeks 1-7`):
+
+| | sim | market | gbm |
+|---|---|---|---|
+| total MAE vs market | 3.2 (bias −2.0) | — | — |
+| total MAE vs actual | 11.4 | 10.7 | — |
+| margin MAE vs actual | 10.8 | 12.1 | — |
+| home win % (actual 48.6%) | 50.9% | — | — |
+| player TD rate (actual .220) | .222 | — | .218 |
+| TD AUC | .668 | — | .688 |
+| TD AUC, 50/50 sim+gbm | .685 | | |
+
+By position the sim runs RB slightly hot (.306 vs .287 actual) and TE slightly cold (.201 vs .211); the gbm is
+closer on both. Week 7 held out behaves the same. The sim does not beat the gbm at ranking scorers, which is why
+it is **display-only**: sim P(TD) sits next to the model's number in the row detail and feeds nothing in
+`select_picks`. What it adds is the game-level picture (median score, win %, over %) and the replay. Known lean:
+sim totals run ~2–3 points under the market (week 8 slate: −2.9 on average, LV@NYJ −7.1); pace is nudged only
+±5% by the total, so high totals are under-reached. Revisit once a few graded weeks show whether the market or
+the sim was closer on those games. Median-game play counts of 135–187 include kicks; the high end comes from
+games with 50+ incompletions stopping the clock.
