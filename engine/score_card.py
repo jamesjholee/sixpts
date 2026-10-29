@@ -95,6 +95,11 @@ def main(season: int, week: int):
                calibration=cal, top20=top_rows, scored_despite_low=fmt(miss_low), favored_but_blanked=fmt(miss_high))
     mk = vs_market(b, week)
     if mk: out["market"] = mk
+    try:
+        from engine import sim_grade
+        sg = sim_grade.grade(season, week, p)
+        if sg: out["sim"] = sg
+    except Exception as e: print("sim grade skipped:", e)
     json.dump(out, open(D / f"scorecard_w{week}.json", "w"))
 
     print(f"Week {week}: {n} players who took a snap · actually scored {act:.1%} · model averaged {pred:.1%}")

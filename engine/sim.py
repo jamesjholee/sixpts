@@ -38,7 +38,10 @@ POS_TGT_FALLBACK = {"WR": .55, "TE": .20, "RB": .20, "QB": .0, "FB": .05}
 # share shaping (fitted on 2026 weeks 1-6 in sim_backtest --grid; week 7 held out)
 RZ_BLEND = 0.5              # weight on red-zone shares vs overall shares inside the 20
 UNIFORM_MIX = 0.06          # share of looks spread evenly over players used in the last 3 games (TDs are flatter than usage)
-RECENT_W = 0.65             # weight on last-3-game shares vs season-to-date / prior-season blend
+RECENT_W = 0.5              # weight on last-3-game shares vs season-to-date / prior-season blend (fitted W2-7 on usage grade)
+SNAP_W = 0.5                # within the recent share: weight on (touches per snap x projected snap share) vs raw touch share
+AVAIL = {"Out": 0.0, "Doubtful": 0.0, "Questionable": 0.6, "DNP": 0.75}   # injury report -> share multiplier (DNP = no game status yet, did not practice)
+ROSTER_BAD = {"INA", "RES", "CUT", "RET", "EXE", "DEV", "TRD"}
 TE_RZ_MULT = 1.3            # tight ends convert red-zone targets at a higher rate than their share implies
 QB_SNEAK = 0.15             # inside the 2, share of runs that are the QB's
 
@@ -84,23 +87,55 @@ def team_inputs(p_prior: pd.DataFrame, p_cur: pd.DataFrame) -> dict:
     out["_league"] = lg
     return out
 
-def recent_usage(pbp: pd.DataFrame, week: int, n: int = 3) -> dict:
+def recent_usage(pbp: pd.DataFrame, week: int, n: int = 3, snaps: pd.DataFrame | None = None, pfr2gsis: dict | None = None) -> dict:
     """Recency-weighted target / carry / dropback shares per team over its last n games before `week`
-    (weights n..1, newest first). -> {team: {"tgt": {gsis: share}, "car": {...}, "db": {...}, "games": k}}."""
+    (weights n..1, newest first). With snap counts: also a snap-based share — each player's touches per snap in
+    those games times his projected snap share — which handles a back returning from injury or one who left a
+    game early. -> {team: {"tgt": {gsis: share}, "car": {...}, "db": {...}, "tgt_snap": {...}, "car_snap": {...}, "games": k}}."""
     p = pbp[(pbp.week < week) & pbp.posteam.notna()]
+    sn = None
+    if snaps is not None and pfr2gsis:
+        sn = snaps[(snaps.week < week) & (snaps.game_type == "REG")].copy(); sn["gsis"] = sn.pfr_player_id.map(pfr2gsis); sn = sn[sn.gsis.notna()]
     out = {}
     for team, q in p.groupby("posteam"):
         wks = sorted(q.week.unique())[-n:]; wt = {w: float(i + 1) for i, w in enumerate(wks)}
         q = q[q.week.isin(wks)]; ww = q.week.map(wt)
-        def shares(mask, col):
-            s = pd.Series(ww[mask].values, index=q.loc[mask, col].values).groupby(level=0).sum(); tot = s.sum()
-            return (s / tot).to_dict() if tot > 0 else {}
-        out[team] = dict(tgt=shares(q.pass_attempt.eq(1) & q.receiver_player_id.notna(), "receiver_player_id"),
-                         car=shares(q.rush_attempt.eq(1) & q.rusher_player_id.notna(), "rusher_player_id"),
-                         db=shares(q.qb_dropback.eq(1) & q.passer_player_id.notna(), "passer_player_id"), games=len(wks))
+        def counts(mask, col): return pd.Series(ww[mask].values, index=q.loc[mask, col].values).groupby(level=0).sum()
+        def shares(c): tot = c.sum(); return (c / tot).to_dict() if tot > 0 else {}
+        tgt_c = counts(q.pass_attempt.eq(1) & q.receiver_player_id.notna(), "receiver_player_id")
+        car_c = counts(q.rush_attempt.eq(1) & q.rusher_player_id.notna(), "rusher_player_id")
+        db_c = counts(q.qb_dropback.eq(1) & q.passer_player_id.notna(), "passer_player_id")
+        o = dict(tgt=shares(tgt_c), car=shares(car_c), db=shares(db_c), games=len(wks), tgt_snap={}, car_snap={})
+        if sn is not None:
+            t = sn[(sn.team == team) & sn.week.isin(wks)]
+            if len(t) and t.week.nunique() >= 2:
+                tw = t.week.map(wt); snaps_w = pd.Series((t.offense_snaps * tw).values, index=t.gsis.values).groupby(level=0).sum()
+                pct_w = pd.Series((t.offense_pct * tw).values, index=t.gsis.values).groupby(level=0).sum() / pd.Series(tw.values, index=t.gsis.values).groupby(level=0).sum()
+                # projected snap share: weighted mean of a player's snap % over the games he appeared in (a missed game is a missed game, not a zero)
+                for key, c in (("tgt_snap", tgt_c), ("car_snap", car_c)):
+                    rate = (c.reindex(snaps_w.index).fillna(0) / snaps_w.clip(lower=1.0))
+                    rate = rate.where(snaps_w >= 10, 0.0)                 # need some snaps to estimate a rate
+                    est = rate * pct_w.reindex(rate.index).fillna(0); o[key] = shares(est)
+        out[team] = o
     return out
 
-def player_inputs(feat: pd.DataFrame, team: str, names: dict | None = None, recent: dict | None = None) -> dict:
+def availability(injuries: pd.DataFrame | None, rosters: pd.DataFrame | None, week: int) -> dict:
+    """{gsis_id: multiplier} from the week's injury report and roster status. Out/Doubtful/IR/inactive -> 0;
+    Questionable -> 0.6; did-not-practice with no game status yet (early in the week) -> 0.75."""
+    m = {}
+    if rosters is not None and len(rosters):
+        r = rosters[rosters.week == min(week, int(rosters.week.max()))].drop_duplicates("gsis_id")
+        for g, st in zip(r.gsis_id, r.status):
+            if st in ROSTER_BAD: m[g] = 0.0
+    if injuries is not None and len(injuries):
+        w = injuries[injuries.week == week]
+        for g, st, pr in zip(w.gsis_id, w.report_status, w.practice_status):
+            if pd.isna(g): continue
+            if st in AVAIL: m[g] = min(m.get(g, 1.0), AVAIL[st])
+            elif pd.isna(st) and isinstance(pr, str) and pr.startswith("Did Not"): m[g] = min(m.get(g, 1.0), AVAIL["DNP"])
+    return m
+
+def player_inputs(feat: pd.DataFrame, team: str, names: dict | None = None, recent: dict | None = None, avail: dict | None = None) -> dict:
     """Target / carry / red-zone shares for one team from the make_features frame (walk-forward), pulled toward what
     the team actually did in its last three games (`recent`, from recent_usage). Normalised within team."""
     f = feat[feat.posteam.eq(team)].copy()
@@ -118,6 +153,8 @@ def player_inputs(feat: pd.DataFrame, team: str, names: dict | None = None, rece
     if R and R["games"] >= 2:
         # what the team did lately outranks the season average: a back who lost his job in week 4 stops getting carries
         rt = f.gsis_id.map(R["tgt"]).fillna(0.0); rc = f.gsis_id.map(R["car"]).fillna(0.0)
+        if R.get("tgt_snap"): rt = (1 - SNAP_W) * rt + SNAP_W * f.gsis_id.map(R["tgt_snap"]).fillna(0.0)
+        if R.get("car_snap"): rc = (1 - SNAP_W) * rc + SNAP_W * f.gsis_id.map(R["car_snap"]).fillna(0.0)
         f["tgt"] = RECENT_W * rt + (1 - RECENT_W) * f.tgt; f["car"] = RECENT_W * rc + (1 - RECENT_W) * f.car
         f["rz_tgt"] = RECENT_W * rt + (1 - RECENT_W) * f.rz_tgt; f["rz_car"] = RECENT_W * rc + (1 - RECENT_W) * f.rz_car
         unused = (rt <= 0) & (rc <= 0)
@@ -129,6 +166,17 @@ def player_inputs(feat: pd.DataFrame, team: str, names: dict | None = None, rece
             f.loc[f.is_qb & ~f.index.isin(starter), ["car", "rz_car"]] = 0.0
     f.loc[f.is_qb, ["tgt", "rz_tgt"]] = 0.0                                   # quarterbacks are not targets
     f.loc[~f.position.isin(["RB", "WR", "TE", "QB", "FB"]), ["tgt", "car", "rz_tgt", "rz_car"]] = 0.0
+    if avail:
+        # injured / inactive players lose their share; it goes to the same position group in proportion to what's left
+        mult = f.gsis_id.map(avail).fillna(1.0).clip(0, 1)
+        if (mult < 1).any():
+            grp = f.position.replace({"FB": "RB"})
+            for c in ["tgt", "car", "rz_tgt", "rz_car"]:
+                before = f.groupby(grp)[c].transform("sum"); f[c] = f[c] * mult; after = f.groupby(grp)[c].transform("sum")
+                f[c] = np.where(after > 0, f[c] * before / after.replace(0, np.nan), f[c])
+                f[c] = f[c].fillna(0.0)
+            if (f.is_qb & (mult < 1)).any() and (f.is_qb & (mult >= 1)).any():
+                f.loc[f.is_qb & (mult >= 1) & (f.car <= 0), "car"] = 0.02   # the healthy QB takes the QB carries
     # red zone shares are noisy and real TD distributions are flatter than usage (injuries, garbage time, trick plays):
     # lean red zone shares back toward overall shares, then mix 12% uniform over the active skill players
     f["rz_tgt"] = RZ_BLEND * f.rz_tgt + (1 - RZ_BLEND) * f.tgt; f["rz_car"] = RZ_BLEND * f.rz_car + (1 - RZ_BLEND) * f.car
@@ -415,7 +463,7 @@ def summarize(out: dict, spread: float | None = None, total: float | None = None
             if td.mean() < 0.005 and P["rec"][:, j].mean() < 0.2 and P["car"][:, j].mean() < 0.2: continue
             s["players"].append(dict(gsis_id=gid, player=P["names"][j], team=out["home"] if side == 0 else out["away"], position=P["pos"][j],
                 p_td=float((td >= 1).mean()), p_2td=float((td >= 2).mean()), rec=float(P["rec"][:, j].mean()), rec_yds=float(P["rec_yds"][:, j].mean()),
-                car=float(P["car"][:, j].mean()), rush_yds=float(P["rush_yds"][:, j].mean()),
+                car=float(P["car"][:, j].mean()), rush_yds=float(P["rush_yds"][:, j].mean()), tgt=float(P["tgt"][:, j].mean()),
                 rec_q=[float(x) for x in np.percentile(P["rec"][:, j], [25, 50, 75])], rec_yds_q=[float(x) for x in np.percentile(P["rec_yds"][:, j], [25, 50, 75])], rush_yds_q=[float(x) for x in np.percentile(P["rush_yds"][:, j], [25, 50, 75])]))
     s["qb"] = [dict(team=out["home"] if k == 0 else out["away"], att=float(qb["att"].mean()), cmp=float(qb["cmp"].mean()), yds=float(qb["yds"].mean()), td=float(qb["td"].mean()), inter=float(qb["inter"].mean()), yds_q=[float(x) for x in np.percentile(qb["yds"], [25, 50, 75])]) for k, qb in enumerate(out["qb"])]
     return s
