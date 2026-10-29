@@ -261,7 +261,16 @@ input{caret-color:var(--bulb)}
 .tile b{font-family:var(--display);font-variation-settings:var(--wide);font-size:clamp(17px,4.6vw,22px);font-variant-numeric:tabular-nums;white-space:nowrap}
 .tile small{color:var(--faint);font-size:11px}
 .sim-player{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:var(--s3)}
+.sim-canvas{border-radius:6px;border:1px solid var(--line)}
 .sim-controls{display:flex;align-items:center;gap:var(--s3);margin-top:var(--s3)}
+/* phones: the replay runs edge to edge like the tables; controls and log keep their inset */
+.scroll-x{overflow-x:auto;scrollbar-width:thin;-webkit-overflow-scrolling:touch}
+@media (max-width:639px){
+  .sim-player{padding:0 0 var(--s2)}
+  .sim-canvas{border-left:0;border-right:0;border-top:0;border-radius:var(--r) var(--r) 0 0}
+  .sim-controls,.sim-log{margin-left:var(--s3);margin-right:var(--s3)}
+  .sim-table .delta,.sim-table .wide{display:none}   /* ranges and the 2+ column go; the table then fits a phone */
+}
 .sim-controls input[type=range]{flex:1;accent-color:var(--bulb);min-width:0}
 .sim-controls .btn{min-width:44px;text-align:center}
 .sim-log{position:relative;list-style:none;margin:var(--s3) 0 0;padding:0;max-height:220px;overflow:auto;border-top:1px solid var(--line);font-size:13px;scrollbar-width:thin}
