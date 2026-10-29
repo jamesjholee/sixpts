@@ -163,7 +163,11 @@ function Replay({ game, gid }: { game: Game; gid: string }) {
   const reduced = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
   const posRef = useRef(0); posRef.current = pos
   const logRef = useRef<HTMLOListElement>(null)
-  useEffect(() => { const el = logRef.current?.children[idx] as HTMLElement | undefined; el?.scrollIntoView({ block: 'nearest' }) }, [idx])
+  useEffect(() => {  // keep the current play visible inside the log box only — never scroll the page
+    const box = logRef.current; const el = box?.children[idx] as HTMLElement | undefined; if (!box || !el) return
+    const top = el.offsetTop - box.offsetTop, bot = top + el.offsetHeight
+    if (top < box.scrollTop) box.scrollTop = top; else if (bot > box.scrollTop + box.clientHeight) box.scrollTop = bot - box.clientHeight
+  }, [idx])
 
   // clock
   useEffect(() => {
@@ -181,7 +185,7 @@ function Replay({ game, gid }: { game: Game; gid: string }) {
     const seg = tl.segs.reduce((a, s) => pos >= s.t0 ? s : a, tl.segs[0]); const p = plays[seg.i]; if (seg.i !== idx) setIdx(seg.i)
     const prevScore: [number, number] = seg.i ? [plays[seg.i - 1].score_home, plays[seg.i - 1].score_away] : [0, 0]
     // layout
-    const top = vertical ? 92 : 64, bottom = H - (vertical ? 74 : 56), margin = vertical ? 10 : 20
+    const top = vertical ? 92 : 64, bottom = H - (vertical ? 74 : 56), margin = vertical ? 0 : 20
     const s = vertical ? (W - 2 * margin) / FW : Math.min((W - 2 * margin) / 120, (bottom - top) / FW); const span = vertical ? (bottom - top) / s : 120
     const px = (x: number, y: number): P => vertical ? [margin + y * s, (top + bottom) / 2 - (x - cam.current) * s] : [(W - 120 * s) / 2 + x * s, (top + bottom) / 2 - (y - FW / 2) * s]
     const clampCam = (x: number) => span < 120 ? Math.min(Math.max(x, span / 2), 120 - span / 2) : 60
@@ -247,14 +251,14 @@ function Replay({ game, gid }: { game: Game; gid: string }) {
     c.fillStyle = '#FFB020'; c.font = `600 ${vertical ? 12 : 12}px Inter, sans-serif`; c.fillText(situation(p, game.home, game.away), W / 2, vertical ? 70 : 56)
     // caption
     const done = t > .5 && !inSetup; const line1 = done ? describe(p, qb) : situation(p, game.home, game.away); const colr = done ? (['TD', 'FG good'].includes(p.result) ? '#FFB020' : ['turnover', 'FG miss', 'downs'].includes(p.result) ? '#F2555A' : '#EEF2F6') : '#8794A5'
-    c.textAlign = 'left'; c.fillStyle = colr; c.font = `800 ${vertical ? 17 : 20}px Archivo, Inter, sans-serif`; c.fillText(line1, margin + 4, bottom + (vertical ? 24 : 24), W - 2 * margin - 8)
-    c.fillStyle = '#8794A5'; c.font = `500 ${vertical ? 12 : 13}px Inter, sans-serif`; c.fillText(`${p.q > 4 ? 'OT' : 'Q' + p.q} ${clock(p.clock)} · play ${seg.i + 1} of ${plays.length}`, margin + 4, bottom + (vertical ? 46 : 46))
+    c.textAlign = 'left'; c.fillStyle = colr; c.font = `800 ${vertical ? 17 : 20}px Archivo, Inter, sans-serif`; c.fillText(line1, margin + 12, bottom + (vertical ? 24 : 24), W - 2 * margin - 24)
+    c.fillStyle = '#8794A5'; c.font = `500 ${vertical ? 12 : 13}px Inter, sans-serif`; c.fillText(`${p.q > 4 ? 'OT' : 'Q' + p.q} ${clock(p.clock)} · play ${seg.i + 1} of ${plays.length}`, margin + 12, bottom + (vertical ? 46 : 46))
   }, [pos, plays, tl, game, ch, ca, qb, idx])
 
   if (!plays.length) return <p className="empty">No play log for this game.</p>
   const jump = (i: number) => { const sg = tl.segs.find(x => x.i === i && !x.qcard); if (sg) { setPos(sg.t0); chor.current = null } }
   return (<div className="sim-player">
-    <canvas ref={ref} style={{ width: '100%', display: 'block', borderRadius: 6, border: '1px solid var(--line)' }} aria-label={`Replay of the median simulated ${game.away} at ${game.home} game`} />
+    <canvas ref={ref} className="sim-canvas" style={{ width: '100%', display: 'block' }} aria-label={`Replay of the median simulated ${game.away} at ${game.home} game`} />
     <div className="sim-controls">
       <button className="btn" onClick={() => { if (pos >= tl.total) { setPos(0); chor.current = null; last.current = {} } setPlaying(!playing) }} aria-label={playing ? 'Pause' : 'Play'}>{playing ? '❚❚' : pos >= tl.total ? '↺' : '▶'}</button>
       <input type="range" min={0} max={tl.total} step={0.05} value={pos} onChange={e => { setPos(+e.target.value); chor.current = null }} aria-label="Scrub the replay" />
@@ -291,10 +295,10 @@ export default function Sim({ week }: { week: number }) {
     <h2 style={{ margin: '18px 0 8px' }}>The median game <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>one of the {g.n.toLocaleString()} sims — the one that landed nearest the median score</span></h2>
     {full ? <Replay game={full} gid={gid} /> : <div className="skeleton" style={{ height: 320 }} />}
     <h2 style={{ margin: '22px 0 8px' }}>Who scores</h2>
-    <table><thead><tr><th className="l">Player</th><th title="Share of the 5,000 simulated games with at least one TD">Sim TD</th><th title="Two or more">2+</th><th title="The model's calibrated P(TD) — the number the picks are built on">Model</th><th>Rec</th><th>Rec yds</th><th>Rush yds</th></tr></thead>
-      <tbody>{top.map(p => <tr key={p.gsis_id}><td className="l">{p.player} <span className="muted">{p.team} {p.position}</span></td><td className="num"><b>{pc(p.p_td)}</b></td><td className="num">{pc(p.p_2td)}</td><td className="num">{pc(p.p_gbm)}</td><td className="num">{p.rec_q[1]}</td><td className="num">{p.rec_yds_q[1]} <span className="delta">{p.rec_yds_q[0]}–{p.rec_yds_q[2]}</span></td><td className="num">{p.rush_yds_q[1]} <span className="delta">{p.rush_yds_q[0]}–{p.rush_yds_q[2]}</span></td></tr>)}</tbody></table>
-    <table style={{ marginTop: 12 }}><thead><tr><th className="l">QB line</th><th>Att</th><th>Cmp</th><th>Yds</th><th>TD</th><th>INT</th></tr></thead>
-      <tbody>{g.qb.map(q => <tr key={q.team}><td className="l">{q.team}</td><td className="num">{q.att.toFixed(0)}</td><td className="num">{q.cmp.toFixed(0)}</td><td className="num">{q.yds_q[1]} <span className="delta">{q.yds_q[0]}–{q.yds_q[2]}</span></td><td className="num">{q.td.toFixed(1)}</td><td className="num">{q.inter.toFixed(1)}</td></tr>)}</tbody></table>
+    <div className="scroll-x"><table className="sim-table"><thead><tr><th className="l">Player</th><th title="Share of the 5,000 simulated games with at least one TD">Sim TD</th><th className="wide" title="Two or more">2+</th><th title="The model's calibrated P(TD) — the number the picks are built on">Model</th><th>Rec</th><th>Rec yds</th><th>Rush yds</th></tr></thead>
+      <tbody>{top.map(p => <tr key={p.gsis_id}><td className="l">{p.player} <span className="muted">{p.team} {p.position}</span></td><td className="num"><b>{pc(p.p_td)}</b></td><td className="num wide">{pc(p.p_2td)}</td><td className="num">{pc(p.p_gbm)}</td><td className="num">{p.rec_q[1]}</td><td className="num">{p.rec_yds_q[1]} <span className="delta">{p.rec_yds_q[0]}–{p.rec_yds_q[2]}</span></td><td className="num">{p.rush_yds_q[1]} <span className="delta">{p.rush_yds_q[0]}–{p.rush_yds_q[2]}</span></td></tr>)}</tbody></table></div>
+    <div className="scroll-x"><table className="sim-table" style={{ marginTop: 12 }}><thead><tr><th className="l">QB line</th><th>Att</th><th>Cmp</th><th>Yds</th><th>TD</th><th>INT</th></tr></thead>
+      <tbody>{g.qb.map(q => <tr key={q.team}><td className="l">{q.team}</td><td className="num">{q.att.toFixed(0)}</td><td className="num">{q.cmp.toFixed(0)}</td><td className="num">{q.yds_q[1]} <span className="delta">{q.yds_q[0]}–{q.yds_q[2]}</span></td><td className="num">{q.td.toFixed(1)}</td><td className="num">{q.inter.toFixed(1)}</td></tr>)}</tbody></table></div>
     <p className="muted" style={{ marginTop: 10, fontSize: 12 }}>{note} The picks on the Board use the model column, not the sim: in the 2026 backtest the model ranks scorers a little better (AUC .688 vs .668). The sim is here for the game-level picture and the replay.</p>
   </div>)
 }
