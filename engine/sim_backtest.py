@@ -29,7 +29,7 @@ def run(season: int, weeks: list[int], n: int, scales: dict, verbose: bool = Tru
         bf = D / f"board_w{w}_public.json"
         if not bf.exists(): print(f"no board for week {w}"); continue
         board = json.load(open(bf)); slate = board["slate"]; rows = board["board"]
-        T = sim.team_inputs(p_prior, p_cur[p_cur.week < w])
+        T = sim.team_inputs(p_prior, p_cur[p_cur.week < w]); recent = sim.recent_usage(p_cur, w)
         feat = feat_all[feat_all.week == w]
         pw = p_cur[p_cur.week == w]
         actual = pw.groupby("game_id").agg(h=("home_score", "max"), a=("away_score", "max")) if "home_score" in pw else None
@@ -41,7 +41,7 @@ def run(season: int, weeks: list[int], n: int, scales: dict, verbose: bool = Tru
             r_home = next((r for r in rows if r["game_id"] == gid and r["team"] == home), None)
             if r_home is None: continue
             spread = -float(r_home["spread"]); total = float(g["total"])   # board: + = favoured -> standard sign
-            PH = sim.player_inputs(feat, home, names); PA = sim.player_inputs(feat, away, names)
+            PH = sim.player_inputs(feat, home, names, recent); PA = sim.player_inputs(feat, away, names, recent)
             if not PH["ids"] or not PA["ids"]: continue
             out = sim.simulate(home, away, T, PH, PA, spread, total, n=n, seed=w * 100 + len(games), keep_log=False, **scales)
             s = sim.summarize(out, spread, total)

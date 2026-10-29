@@ -37,7 +37,8 @@ SEC_KICK = 5
 POS_TGT_FALLBACK = {"WR": .55, "TE": .20, "RB": .20, "QB": .0, "FB": .05}
 # share shaping (fitted on 2026 weeks 1-6 in sim_backtest --grid; week 7 held out)
 RZ_BLEND = 0.5              # weight on red-zone shares vs overall shares inside the 20
-UNIFORM_MIX = 0.20          # share of looks spread evenly over active skill players (TDs are flatter than usage)
+UNIFORM_MIX = 0.06          # share of looks spread evenly over players used in the last 3 games (TDs are flatter than usage)
+RECENT_W = 0.65             # weight on last-3-game shares vs season-to-date / prior-season blend
 TE_RZ_MULT = 1.3            # tight ends convert red-zone targets at a higher rate than their share implies
 QB_SNEAK = 0.15             # inside the 2, share of runs that are the QB's
 
@@ -83,8 +84,25 @@ def team_inputs(p_prior: pd.DataFrame, p_cur: pd.DataFrame) -> dict:
     out["_league"] = lg
     return out
 
-def player_inputs(feat: pd.DataFrame, team: str, names: dict | None = None) -> dict:
-    """Target / carry / red-zone shares for one team from the make_features frame (walk-forward). Normalised within team."""
+def recent_usage(pbp: pd.DataFrame, week: int, n: int = 3) -> dict:
+    """Recency-weighted target / carry / dropback shares per team over its last n games before `week`
+    (weights n..1, newest first). -> {team: {"tgt": {gsis: share}, "car": {...}, "db": {...}, "games": k}}."""
+    p = pbp[(pbp.week < week) & pbp.posteam.notna()]
+    out = {}
+    for team, q in p.groupby("posteam"):
+        wks = sorted(q.week.unique())[-n:]; wt = {w: float(i + 1) for i, w in enumerate(wks)}
+        q = q[q.week.isin(wks)]; ww = q.week.map(wt)
+        def shares(mask, col):
+            s = pd.Series(ww[mask].values, index=q.loc[mask, col].values).groupby(level=0).sum(); tot = s.sum()
+            return (s / tot).to_dict() if tot > 0 else {}
+        out[team] = dict(tgt=shares(q.pass_attempt.eq(1) & q.receiver_player_id.notna(), "receiver_player_id"),
+                         car=shares(q.rush_attempt.eq(1) & q.rusher_player_id.notna(), "rusher_player_id"),
+                         db=shares(q.qb_dropback.eq(1) & q.passer_player_id.notna(), "passer_player_id"), games=len(wks))
+    return out
+
+def player_inputs(feat: pd.DataFrame, team: str, names: dict | None = None, recent: dict | None = None) -> dict:
+    """Target / carry / red-zone shares for one team from the make_features frame (walk-forward), pulled toward what
+    the team actually did in its last three games (`recent`, from recent_usage). Normalised within team."""
     f = feat[feat.posteam.eq(team)].copy()
     if f.empty: return dict(ids=[], names=[], pos=[], tgt=np.zeros(0), car=np.zeros(0), rz_tgt=np.zeros(0), rz_car=np.zeros(0), qb=-1)
     g = f.g_std.fillna(0).clip(lower=0); w = g / (g + 2.0)                     # two games of this season = half weight
@@ -96,6 +114,19 @@ def player_inputs(feat: pd.DataFrame, team: str, names: dict | None = None) -> d
     f["tgt"] = share("tgt_share_std", "tgt_share_prev", 0.004); f["car"] = share("car_share_std", "car_share_prev", 0.003)
     f["rz_tgt"] = share("rz_tgt_share_std", "rz_tgt_share_prev", 0.004); f["rz_car"] = share("rz_car_share_std", "rz_car_share_prev", 0.003)
     f["is_qb"] = f.position.eq("QB")
+    R = (recent or {}).get(team)
+    if R and R["games"] >= 2:
+        # what the team did lately outranks the season average: a back who lost his job in week 4 stops getting carries
+        rt = f.gsis_id.map(R["tgt"]).fillna(0.0); rc = f.gsis_id.map(R["car"]).fillna(0.0)
+        f["tgt"] = RECENT_W * rt + (1 - RECENT_W) * f.tgt; f["car"] = RECENT_W * rc + (1 - RECENT_W) * f.car
+        f["rz_tgt"] = RECENT_W * rt + (1 - RECENT_W) * f.rz_tgt; f["rz_car"] = RECENT_W * rc + (1 - RECENT_W) * f.rz_car
+        unused = (rt <= 0) & (rc <= 0)
+        f.loc[unused, ["tgt", "car", "rz_tgt", "rz_car"]] *= 0.15                # no touch in three games: a sliver, not a share
+        # quarterback carries belong to the quarterback who is taking the snaps
+        db = f.gsis_id.map(R["db"]).fillna(0.0)
+        if (f.is_qb & (db > 0)).any():
+            starter = f.index[f.is_qb & (db == db[f.is_qb].max())]
+            f.loc[f.is_qb & ~f.index.isin(starter), ["car", "rz_car"]] = 0.0
     f.loc[f.is_qb, ["tgt", "rz_tgt"]] = 0.0                                   # quarterbacks are not targets
     f.loc[~f.position.isin(["RB", "WR", "TE", "QB", "FB"]), ["tgt", "car", "rz_tgt", "rz_car"]] = 0.0
     # red zone shares are noisy and real TD distributions are flatter than usage (injuries, garbage time, trick plays):
@@ -105,7 +136,7 @@ def player_inputs(feat: pd.DataFrame, team: str, names: dict | None = None) -> d
     for c in ["tgt", "car", "rz_tgt", "rz_car"]:
         s_ = f[c].sum()
         if s_ > 0:
-            active = (f[c] > 0.01) & ~f.is_qb if c.endswith("tgt") else (f[c] > 0.01)
+            active = (f[c] > 0.01) & ~f.is_qb if c.endswith("tgt") else (f[c] > 0.01) & ~f.is_qb
             uni = active / max(1, active.sum())
             f[c] = (1 - UNIFORM_MIX) * f[c] / s_ + UNIFORM_MIX * uni
     if f.tgt.sum() <= 0: f["tgt"] = f.position.map(POS_TGT_FALLBACK).fillna(0); f["rz_tgt"] = f.tgt

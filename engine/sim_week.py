@@ -20,7 +20,7 @@ def main(season: int, week: int, n: int):
     t0 = time.time()
     board = json.load(open(D / f"board_w{week}_public.json")); rows, slate = board["board"], board["slate"]
     p_prior = M.prep_pbp(ingest.load_pbp(season - 1)); p_cur = M.prep_pbp(ingest.load_pbp(season, force=True))
-    T = sim.team_inputs(p_prior, p_cur[p_cur.week < week])
+    T = sim.team_inputs(p_prior, p_cur[p_cur.week < week]); recent = sim.recent_usage(p_cur, week)
     feat = pd.read_parquet(D / f"upcoming_w{week}.parquet"); feat, _ = make_features(feat); feat = feat[(feat.season == season) & (feat.week == week)]
     names = {}
     try: pl = pd.read_parquet(ingest.nflverse_file("players/players.parquet")); names = dict(zip(pl.gsis_id, pl.display_name))
@@ -33,7 +33,7 @@ def main(season: int, week: int, n: int):
         r_home = next((r for r in rows if r["game_id"] == gid and r["team"] == home), None)
         if r_home is None: continue
         spread, total = -float(r_home["spread"]), float(g["total"])   # board stores + = favoured; the sim takes the standard sign (- = home favoured)
-        PH = sim.player_inputs(feat, home, names); PA = sim.player_inputs(feat, away, names)
+        PH = sim.player_inputs(feat, home, names, recent); PA = sim.player_inputs(feat, away, names, recent)
         if not PH["ids"] or not PA["ids"]: print(f"skip {gid}: no players"); continue
         out = sim.simulate(home, away, T, PH, PA, spread, total, n=n, seed=season * 1000 + week * 50 + i, keep_log=True)
         s = sim.summarize(out, spread, total)

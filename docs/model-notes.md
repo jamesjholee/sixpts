@@ -254,3 +254,12 @@ from nflverse play-by-play through the previous week. Four games a page, 1600×2
 replays; `/api/sim/{week}` lists the pages and the Sim tab links them. Spot-checked against a published
 third-party sheet for week 8: yardage, points and TD figures match to the decimal; fantasy columns differ only by
 scoring format.
+
+**Usage realism (same week).** Reviewing the CAR@GB replay: a backup QB took the first carry of the game and five
+Carolina backs split carries, when the real last three games were Hubbard 20·28·7 with Etienne and Tyus only
+appearing in week 7. Shares had been season-to-date blended with last season, plus a 20% uniform mix across the
+roster, and every snap draws independently. Now `recent_usage` (recency-weighted shares over the team's last three
+games, weights 3·2·1) carries 65% of each share, a player with no touch in those games keeps 15% of his old share,
+quarterback carries go only to the QB taking the dropbacks, and the uniform mix is 6% over players actually used.
+CAR sim after: Hubbard 14.6 carries, Etienne 3.4, Tyus 2.6, Brooks ~0. W1–7 backtest unchanged on scorers
+(sim AUC .681, blend .692, sim log-loss .503 → .498).
