@@ -48,6 +48,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      week: ${{ steps.score.outputs.week }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -62,6 +64,7 @@ jobs:
           key: sixpts-data-${{ github.run_id }}
           restore-keys: sixpts-data-
       - name: Score the week
+        id: score
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           PF_COOKIE: ${{ secrets.PF_COOKIE }}
@@ -75,7 +78,7 @@ jobs:
           python3 -m engine.score_week --season 2026 --week $WEEK
           python3 -m engine.team_profiles --season 2026 --week $WEEK
           python3 -m engine.sim_week --season 2026 --week $WEEK || true
-          echo "WEEK=$WEEK" >> $GITHUB_ENV
+          echo "WEEK=$WEEK" >> $GITHUB_ENV; echo "week=$WEEK" >> $GITHUB_OUTPUT
           if [ -n "$ODDS_API_KEY" ]; then python3 -m engine.odds_api --week $WEEK || true; fi
           if [ -n "$PF_COOKIE" ]; then python3 -m engine.pf_odds --week $WEEK --live || true; fi
       - name: Commit public boards so the deployed API serves them
@@ -90,3 +93,44 @@ jobs:
           path: |
             data/board_*.json
             data/teams_*.json
+
+  # One replay video per game (the simulated game nearest the median score), 9x16 for social. Rendered after the
+  # Tuesday board so the sim JSON is on main; published as release assets so the videos never bloat the repo.
+  replays:
+    needs: run
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 11 * * 2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: main }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r requirements.txt skia-python && ffmpeg -version | head -1
+      - name: Render
+        env: { WEEK: "${{ needs.run.outputs.week }}" }
+        run: |
+          test -f data/sim_w${WEEK}.json || { echo "no sim for week $WEEK"; exit 0; }
+          python3 -m engine.replay --week $WEEK --format 9x16 --crf 23
+          ls -la data/replays/w${WEEK}
+      - name: Publish as release assets
+        env: { WEEK: "${{ needs.run.outputs.week }}", GH_TOKEN: "${{ github.token }}" }
+        run: |
+          test -d data/replays/w${WEEK} || exit 0
+          TAG=replays-w${WEEK}
+          gh release view $TAG >/dev/null 2>&1 || gh release create $TAG --title "Week ${WEEK} sim replays" --notes "One video per game: the simulated game nearest the median score, play by play. Simulated, not predicted."
+          gh release upload $TAG data/replays/w${WEEK}/*.mp4 --clobber
+          python3 - <<'PY'
+          import json, os, pathlib
+          w = os.environ["WEEK"]; repo = os.environ.get("GITHUB_REPOSITORY", "jamesjholee/sixpts")
+          files = sorted(p.name for p in pathlib.Path(f"data/replays/w{w}").glob("*.mp4"))
+          m = {}
+          for f in files:
+              gid, fmt = f.rsplit("_", 1); m.setdefault(gid, {})[fmt[:-4]] = f"https://github.com/{repo}/releases/download/replays-w{w}/{f}"
+          json.dump({"week": int(w), "games": m}, open(f"data/replays_w{w}.json", "w"), indent=1)
+          PY
+          git config user.name "sixpts-bot"; git config user.email "bot@sixpts.com"
+          git add -f data/replays_w${WEEK}.json
+          git diff --cached --quiet || (git commit -m "replays: week ${WEEK} [skip ci]" && git pull --rebase && git push)

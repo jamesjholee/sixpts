@@ -170,11 +170,15 @@ def _sim(week: int):
     if not f.exists(): raise HTTPException(404, detail={"message": f"No simulations for week {week} yet."})
     return json.load(open(f))
 
+def _replays(week: int) -> dict:
+    f = DATA / f"replays_w{week}.json"
+    return json.load(open(f))["games"] if f.exists() else {}
+
 @app.get("/api/sim/{week}")
 def sim_week(week: int):
-    """Every game on the slate: outcome probabilities, quantiles, per-player distributions. No play logs (see /api/sim/{week}/{game_id})."""
-    d = _sim(week)
-    return {**{k: v for k, v in d.items() if k != "games"}, "games": {g: {k: v for k, v in s.items() if k != "log"} for g, s in d["games"].items()}}
+    """Every game on the slate: outcome probabilities, quantiles, per-player distributions, replay video URLs when rendered. No play logs (see /api/sim/{week}/{game_id})."""
+    d = _sim(week); rp = _replays(week)
+    return {**{k: v for k, v in d.items() if k != "games"}, "games": {g: {**{k: v for k, v in s.items() if k != "log"}, "replay": rp.get(g)} for g, s in d["games"].items()}}
 
 @app.get("/api/sim/{week}/{game_id}")
 def sim_game(week: int, game_id: str):

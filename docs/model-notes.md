@@ -196,3 +196,20 @@ sim totals run ~2–3 points under the market (week 8 slate: −2.9 on average, 
 ±5% by the total, so high totals are under-reached. Revisit once a few graded weeks show whether the market or
 the sim was closer on those games. Median-game play counts of 135–187 include kicks; the high end comes from
 games with 50+ incompletions stopping the clock.
+
+## Simulator, part 2 — replay videos (week 8)
+
+`engine/replay.py` turns a game's median-game play log into an mp4 for posting: `python3 -m engine.replay --week 8
+--game 2026_08_KC_DEN --format 9x16` (needs `pip install skia-python` and ffmpeg). Skia draws every frame
+(~13 ms at 1080×1920), ffmpeg encodes from a pipe; ~1 s of render per second of video on one core. 9x16 is a
+broadcast-style camera that follows the ball down a vertical field; 16x9 shows the whole field. Plays are
+choreographed from the log's fields (type, air, gain, carrier, result): 22 dots, the carrier ringed in amber
+with a trail, defenders converging with lag, the ball arcing on passes and kicks. Pace is capped at 1.8× nominal,
+so a 140-play game runs ~90 s; intro and outro carry the sim numbers (win %, median, over %, top P(TD)).
+Team dot colours are chosen per matchup to be bright on the turf, apart from each other, and apart from the brand
+amber, with silver standing in when a team's palette can't manage it (KC@DEN: red vs silver).
+
+The Tuesday workflow renders every game 9x16 in a `replays` job after the board commits and publishes the files
+as assets of a `replays-w{N}` GitHub release (videos never enter the repo); `data/replays_w{N}.json` carries
+the URLs, `/api/sim/{week}` attaches them per game, and the Games view links "Watch the sim". The median-game
+picker now skips ties (a 19–19 "median game" made a poor video).
