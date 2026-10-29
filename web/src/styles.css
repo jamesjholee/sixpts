@@ -264,7 +264,7 @@ input{caret-color:var(--bulb)}
 .sim-controls{display:flex;align-items:center;gap:var(--s3);margin-top:var(--s3)}
 .sim-controls input[type=range]{flex:1;accent-color:var(--bulb);min-width:0}
 .sim-controls .btn{min-width:44px;text-align:center}
-.sim-log{list-style:none;margin:var(--s3) 0 0;padding:0;max-height:220px;overflow:auto;border-top:1px solid var(--line);font-size:13px;scrollbar-width:thin}
+.sim-log{position:relative;list-style:none;margin:var(--s3) 0 0;padding:0;max-height:220px;overflow:auto;border-top:1px solid var(--line);font-size:13px;scrollbar-width:thin}
 .sim-log li{display:flex;gap:10px;padding:5px 6px;border-bottom:1px solid var(--line)}
 .sim-log li>span:first-child{flex:0 0 72px;font-variant-numeric:tabular-nums}
 .sim-log li>span:nth-child(2){flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

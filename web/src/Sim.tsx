@@ -163,7 +163,11 @@ function Replay({ game, gid }: { game: Game; gid: string }) {
   const reduced = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
   const posRef = useRef(0); posRef.current = pos
   const logRef = useRef<HTMLOListElement>(null)
-  useEffect(() => { const el = logRef.current?.children[idx] as HTMLElement | undefined; el?.scrollIntoView({ block: 'nearest' }) }, [idx])
+  useEffect(() => {  // keep the current play visible inside the log box only — never scroll the page
+    const box = logRef.current; const el = box?.children[idx] as HTMLElement | undefined; if (!box || !el) return
+    const top = el.offsetTop - box.offsetTop, bot = top + el.offsetHeight
+    if (top < box.scrollTop) box.scrollTop = top; else if (bot > box.scrollTop + box.clientHeight) box.scrollTop = bot - box.clientHeight
+  }, [idx])
 
   // clock
   useEffect(() => {
