@@ -279,3 +279,16 @@ input{caret-color:var(--bulb)}
 .sim-log li>span:nth-child(2){flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sim-log li.on{background:var(--bulb-dim)}
 .sim-log li:hover{background:var(--raise)}
+
+.sim-last{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:var(--s3);min-height:34px}
+.sim-last .chip{font-size:10px;letter-spacing:.04em}
+.sim-down{background:var(--bulb);color:var(--on-bulb);font-family:var(--display);font-variation-settings:var(--wide);font-weight:800;padding:4px 10px;border-radius:var(--r-sm);font-size:14px}
+.sim-line{font-family:var(--display);font-variation-settings:var(--wide);font-weight:700;font-size:16px;flex-basis:100%}
+.sim-line.muted{font-weight:500}
+.sim-panels{display:grid;grid-template-columns:1fr 1fr;gap:var(--s2);margin-top:var(--s3)}
+.sim-panel{background:var(--raise);border:1px solid var(--line);border-top:3px solid var(--bulb);border-radius:var(--r);padding:8px 10px;font-size:12px}
+.sim-panel b{display:block;font-family:var(--display);font-variation-settings:var(--wide);font-size:13px;margin-bottom:4px}
+.sim-row{display:grid;grid-template-columns:62px 1fr;gap:2px 8px;padding:4px 0;border-top:1px solid var(--line)}
+.sim-row .sim-l{color:var(--bulb);font-size:10px;text-transform:uppercase;letter-spacing:.04em;grid-row:span 2;align-self:start;padding-top:2px}
+.sim-row span:nth-child(2){font-weight:600}
+@media (max-width:639px){ .sim-panels{grid-template-columns:1fr 1fr;margin-left:var(--s3);margin-right:var(--s3)} .sim-last{margin-left:var(--s3);margin-right:var(--s3)} }
