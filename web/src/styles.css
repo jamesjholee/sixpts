@@ -253,3 +253,20 @@ input{caret-color:var(--bulb)}
 @media (max-width:720px){ .search{min-width:0;flex:1 1 160px} .parlay-grid{grid-template-columns:1fr;gap:var(--s2)}
   .tray{gap:8px;padding:8px 11px} .tray h2{font-size:14px} .tray .list{font-size:12px;gap:4px} .tray .item{padding:3px 7px}
   .tray .btn{padding:5px 9px;font-size:13px} .tray .confirm{flex:1 1 100%;justify-content:space-between} }
+
+/* ---- Sim view ---- */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:var(--s2);margin-top:var(--s2)}
+.tile{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:11px 13px;display:flex;flex-direction:column;gap:2px;animation:rise var(--settle) var(--ease)}
+.tile-l{color:var(--faint);font-size:12px}
+.tile b{font-family:var(--display);font-variation-settings:var(--wide);font-size:clamp(17px,4.6vw,22px);font-variant-numeric:tabular-nums;white-space:nowrap}
+.tile small{color:var(--faint);font-size:11px}
+.sim-player{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:var(--s3)}
+.sim-controls{display:flex;align-items:center;gap:var(--s3);margin-top:var(--s3)}
+.sim-controls input[type=range]{flex:1;accent-color:var(--bulb);min-width:0}
+.sim-controls .btn{min-width:44px;text-align:center}
+.sim-log{list-style:none;margin:var(--s3) 0 0;padding:0;max-height:220px;overflow:auto;border-top:1px solid var(--line);font-size:13px;scrollbar-width:thin}
+.sim-log li{display:flex;gap:10px;padding:5px 6px;border-bottom:1px solid var(--line)}
+.sim-log li>span:first-child{flex:0 0 72px;font-variant-numeric:tabular-nums}
+.sim-log li>span:nth-child(2){flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sim-log li.on{background:var(--bulb-dim)}
+.sim-log li:hover{background:var(--raise)}
