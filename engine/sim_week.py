@@ -32,7 +32,10 @@ def main(season: int, week: int, n: int):
     except Exception as e: print("injuries unavailable:", e)
     try: ros = pd.read_parquet(ingest.nflverse_file(f"weekly_rosters/roster_weekly_{season}.parquet", force=True))
     except Exception as e: print("rosters unavailable:", e)
-    recent = sim.recent_usage(p_cur, week, snaps=snaps, pfr2gsis=pfr2gsis); avail = sim.availability(inj, ros, week)
+    dc = None
+    try: dc = pd.read_parquet(ingest.nflverse_file(f"depth_charts/depth_charts_{season}.parquet", force=True))
+    except Exception as e: print("depth charts unavailable:", e)
+    recent = sim.recent_usage(p_cur, week, snaps=snaps, pfr2gsis=pfr2gsis); avail = sim.availability(inj, ros, week, sim.played_last(p_cur, week)); depth = sim.depth_prior(dc)
     n_out = sum(1 for v in avail.values() if v == 0); n_q = sum(1 for v in avail.values() if 0 < v < 1)
     print(f"availability: {n_out} players out/inactive, {n_q} reduced (questionable / did not practice)")
     feat = pd.read_parquet(D / f"upcoming_w{week}.parquet"); feat, _ = make_features(feat); feat = feat[(feat.season == season) & (feat.week == week)]
@@ -45,7 +48,7 @@ def main(season: int, week: int, n: int):
         r_home = next((r for r in rows if r["game_id"] == gid and r["team"] == home), None)
         if r_home is None: continue
         spread, total = -float(r_home["spread"]), float(g["total"])   # board stores + = favoured; the sim takes the standard sign (- = home favoured)
-        PH = sim.player_inputs(feat, home, names, recent, avail); PA = sim.player_inputs(feat, away, names, recent, avail)
+        PH = sim.player_inputs(feat, home, names, recent, avail, depth); PA = sim.player_inputs(feat, away, names, recent, avail, depth)
         if not PH["ids"] or not PA["ids"]: print(f"skip {gid}: no players"); continue
         out = sim.simulate(home, away, T, PH, PA, spread, total, n=n, seed=season * 1000 + week * 50 + i, keep_log=True)
         s = sim.summarize(out, spread, total)

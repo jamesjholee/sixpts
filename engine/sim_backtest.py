@@ -27,13 +27,14 @@ def run(season: int, weeks: list[int], n: int, scales: dict, verbose: bool = Tru
     snaps = pd.read_parquet(D / f"snap_counts_{season}.parquet") if (D / f"snap_counts_{season}.parquet").exists() and scales.get("use_snaps", True) else None
     inj = pd.read_parquet(D / f"injuries_{season}.parquet") if (D / f"injuries_{season}.parquet").exists() and scales.get("use_inj", True) else None
     ros = pd.read_parquet(D / f"roster_weekly_{season}.parquet") if (D / f"roster_weekly_{season}.parquet").exists() and scales.get("use_inj", True) else None
-    scales = {k: v for k, v in scales.items() if k not in ("use_snaps", "use_inj")}
+    dc = pd.read_parquet(D / f"depth_charts_{season}.parquet") if (D / f"depth_charts_{season}.parquet").exists() and scales.get("use_depth", True) else None
+    scales = {k: v for k, v in scales.items() if k not in ("use_snaps", "use_inj", "use_depth")}
     games, players = [], []
     for w in weeks:
         bf = D / f"board_w{w}_public.json"
         if not bf.exists(): print(f"no board for week {w}"); continue
         board = json.load(open(bf)); slate = board["slate"]; rows = board["board"]
-        T = sim.team_inputs(p_prior, p_cur[p_cur.week < w]); recent = sim.recent_usage(p_cur, w, snaps=snaps, pfr2gsis=pfr2gsis); avail = sim.availability(inj, ros, w)
+        T = sim.team_inputs(p_prior, p_cur[p_cur.week < w]); recent = sim.recent_usage(p_cur, w, snaps=snaps, pfr2gsis=pfr2gsis); avail = sim.availability(inj, ros, w, sim.played_last(p_cur, w)); depth = sim.depth_prior(dc, p_cur[p_cur.week == w].game_date.min() if len(p_cur[p_cur.week == w]) else None)
         feat = feat_all[feat_all.week == w]
         pw = p_cur[p_cur.week == w]
         act_car = pw[pw.rush_attempt == 1].groupby("rusher_player_id").size(); act_tgt = pw[pw.pass_attempt == 1].groupby("receiver_player_id").size()
@@ -46,7 +47,7 @@ def run(season: int, weeks: list[int], n: int, scales: dict, verbose: bool = Tru
             r_home = next((r for r in rows if r["game_id"] == gid and r["team"] == home), None)
             if r_home is None: continue
             spread = -float(r_home["spread"]); total = float(g["total"])   # board: + = favoured -> standard sign
-            PH = sim.player_inputs(feat, home, names, recent, avail); PA = sim.player_inputs(feat, away, names, recent, avail)
+            PH = sim.player_inputs(feat, home, names, recent, avail, depth); PA = sim.player_inputs(feat, away, names, recent, avail, depth)
             if not PH["ids"] or not PA["ids"]: continue
             out = sim.simulate(home, away, T, PH, PA, spread, total, n=n, seed=w * 100 + len(games), keep_log=False, **scales)
             s = sim.summarize(out, spread, total)
