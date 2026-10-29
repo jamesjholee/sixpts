@@ -278,3 +278,12 @@ favourite-won %, usage MAE/corr, P(TD) Brier/AUC vs the model, and the eight big
 `score_card` stores it under `sim` in the weekly scorecard. Week 7: usage carries corr .884, targets .749; biggest
 misses were in-game exits and blowouts (Aaron Jones 24.8 → 9, Dobbins 17.8 → 6, Hubbard 20.2 → 12) — the thing a
 pre-game model cannot know, which is the honest ceiling on this.
+
+**Jacobs (same day).** The nflverse roster file carried Josh Jacobs as `EXE` in every week he played, so both the
+sim's availability gate and the Longshot roster filter in `score_week` dropped him. New rule in both places: a player
+with a touch or dropback in his team's most recent game is on the team, whatever the roster file says
+(`played_last`). And a returning starter was being treated as a committee back because one game is one-third of a
+three-game window: the nflverse depth chart (weekly, walk-forward by date) now supplies a prior — a position's
+touches split RB 60/28/9/3, WR 30/26/22/12/6/4, TE 65/25/10 by listed rank — blended at `DEPTH_W 0.5` (fitted:
+carries MAE 1.22 → 1.18, targets corr .696 → .703, TD unchanged). GB backfield after: Jacobs 9.0, Lloyd 6.6,
+Strong 4.6, Johnson 2.8.

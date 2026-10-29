@@ -42,6 +42,8 @@ RECENT_W = 0.5              # weight on last-3-game shares vs season-to-date / p
 SNAP_W = 0.5                # within the recent share: weight on (touches per snap x projected snap share) vs raw touch share
 AVAIL = {"Out": 0.0, "Doubtful": 0.0, "Questionable": 0.6, "DNP": 0.75}   # injury report -> share multiplier (DNP = no game status yet, did not practice)
 ROSTER_BAD = {"INA", "RES", "CUT", "RET", "EXE", "DEV", "TRD"}
+DEPTH_W = 0.5               # weight of the depth-chart prior inside the recent share (fitted W2-7: a listed RB1 back from injury is RB1)
+DEPTH_PRIOR = {"RB": [.60, .28, .09, .03], "WR": [.30, .26, .22, .12, .06, .04], "TE": [.65, .25, .10], "QB": [1.0]}
 TE_RZ_MULT = 1.3            # tight ends convert red-zone targets at a higher rate than their share implies
 QB_SNEAK = 0.15             # inside the 2, share of runs that are the QB's
 
@@ -119,14 +121,38 @@ def recent_usage(pbp: pd.DataFrame, week: int, n: int = 3, snaps: pd.DataFrame |
         out[team] = o
     return out
 
-def availability(injuries: pd.DataFrame | None, rosters: pd.DataFrame | None, week: int) -> dict:
+def played_last(pbp: pd.DataFrame, week: int) -> set:
+    """gsis_ids with a touch or dropback in their team's most recent game before `week` — evidence that outranks a
+    stale roster status (nflverse listed Josh Jacobs as EXE in every week he played)."""
+    p = pbp[(pbp.week < week) & pbp.posteam.notna()]
+    if p.empty: return set()
+    last = p.groupby("posteam").week.max(); q = p[p.week == p.posteam.map(last)]
+    return set(q.rusher_player_id.dropna()) | set(q.receiver_player_id.dropna()) | set(q.passer_player_id.dropna())
+
+def depth_prior(depth: pd.DataFrame | None, before: pd.Timestamp | None = None) -> dict:
+    """{team: {gsis_id: prior share of the position's touches}} from the latest nflverse depth chart dated before
+    `before` (walk-forward). Only QB/RB/WR/TE ranks the prior knows about."""
+    if depth is None or not len(depth): return {}
+    d = depth.copy(); d["dt"] = pd.to_datetime(d.dt, utc=True)
+    if before is not None: d = d[d.dt < pd.Timestamp(before).tz_localize("UTC") if pd.Timestamp(before).tzinfo is None else pd.Timestamp(before)]
+    if d.empty: return {}
+    d = d[d.dt == d.dt.max()]; d = d[d.pos_abb.isin(DEPTH_PRIOR)]
+    out = {}
+    for (team, pos), q in d.groupby(["team", "pos_abb"]):
+        pri = DEPTH_PRIOR[pos]
+        for g, rk in zip(q.gsis_id, q.pos_rank):
+            if pd.notna(g) and 1 <= int(rk) <= len(pri): out.setdefault(team, {})[g] = pri[int(rk) - 1]
+    return out
+
+def availability(injuries: pd.DataFrame | None, rosters: pd.DataFrame | None, week: int, played: set | None = None) -> dict:
     """{gsis_id: multiplier} from the week's injury report and roster status. Out/Doubtful/IR/inactive -> 0;
-    Questionable -> 0.6; did-not-practice with no game status yet (early in the week) -> 0.75."""
-    m = {}
+    Questionable -> 0.6; did-not-practice with no game status yet (early in the week) -> 0.75. A player who played
+    his team's last game is never dropped on roster status alone."""
+    m = {}; played = played or set()
     if rosters is not None and len(rosters):
         r = rosters[rosters.week == min(week, int(rosters.week.max()))].drop_duplicates("gsis_id")
         for g, st in zip(r.gsis_id, r.status):
-            if st in ROSTER_BAD: m[g] = 0.0
+            if st in ROSTER_BAD and g not in played: m[g] = 0.0
     if injuries is not None and len(injuries):
         w = injuries[injuries.week == week]
         for g, st, pr in zip(w.gsis_id, w.report_status, w.practice_status):
@@ -135,7 +161,7 @@ def availability(injuries: pd.DataFrame | None, rosters: pd.DataFrame | None, we
             elif pd.isna(st) and isinstance(pr, str) and pr.startswith("Did Not"): m[g] = min(m.get(g, 1.0), AVAIL["DNP"])
     return m
 
-def player_inputs(feat: pd.DataFrame, team: str, names: dict | None = None, recent: dict | None = None, avail: dict | None = None) -> dict:
+def player_inputs(feat: pd.DataFrame, team: str, names: dict | None = None, recent: dict | None = None, avail: dict | None = None, depth: dict | None = None) -> dict:
     """Target / carry / red-zone shares for one team from the make_features frame (walk-forward), pulled toward what
     the team actually did in its last three games (`recent`, from recent_usage). Normalised within team."""
     f = feat[feat.posteam.eq(team)].copy()
@@ -153,11 +179,22 @@ def player_inputs(feat: pd.DataFrame, team: str, names: dict | None = None, rece
     if R and R["games"] >= 2:
         # what the team did lately outranks the season average: a back who lost his job in week 4 stops getting carries
         rt = f.gsis_id.map(R["tgt"]).fillna(0.0); rc = f.gsis_id.map(R["car"]).fillna(0.0)
-        if R.get("tgt_snap"): rt = (1 - SNAP_W) * rt + SNAP_W * f.gsis_id.map(R["tgt_snap"]).fillna(0.0)
-        if R.get("car_snap"): rc = (1 - SNAP_W) * rc + SNAP_W * f.gsis_id.map(R["car_snap"]).fillna(0.0)
+        # snap-based share where the player has snap rows; where snap data lags (last week's game not posted yet) keep his touch share
+        if R.get("tgt_snap"): st_ = f.gsis_id.map(R["tgt_snap"]); rt = (1 - SNAP_W) * rt + SNAP_W * st_.where(st_.notna(), rt)
+        if R.get("car_snap"): sc_ = f.gsis_id.map(R["car_snap"]); rc = (1 - SNAP_W) * rc + SNAP_W * sc_.where(sc_.notna(), rc)
+        D_ = (depth or {}).get(team)
+        if D_:
+            # depth-chart prior: a position's touches split by listed rank, scaled to that position's share of the team's touches
+            dp = f.gsis_id.map(D_).fillna(0.0); grp = f.position.replace({"FB": "RB"})
+            for col, src in (("tgt", rt), ("car", rc)):
+                pos_tot = src.groupby(grp).transform("sum"); dp_tot = dp.groupby(grp).transform("sum")
+                prior = np.where(dp_tot > 0, dp / dp_tot.replace(0, np.nan) * pos_tot, 0.0)
+                prior = pd.Series(prior, index=f.index).fillna(0.0)
+                if col == "tgt": rt = (1 - DEPTH_W) * rt + DEPTH_W * prior
+                else: rc = (1 - DEPTH_W) * rc + DEPTH_W * prior
         f["tgt"] = RECENT_W * rt + (1 - RECENT_W) * f.tgt; f["car"] = RECENT_W * rc + (1 - RECENT_W) * f.car
         f["rz_tgt"] = RECENT_W * rt + (1 - RECENT_W) * f.rz_tgt; f["rz_car"] = RECENT_W * rc + (1 - RECENT_W) * f.rz_car
-        unused = (rt <= 0) & (rc <= 0)
+        unused = (f.gsis_id.map(R["tgt"]).fillna(0.0) <= 0) & (f.gsis_id.map(R["car"]).fillna(0.0) <= 0) & (f.gsis_id.map((depth or {}).get(team, {})).fillna(0.0) <= 0)
         f.loc[unused, ["tgt", "car", "rz_tgt", "rz_car"]] *= 0.15                # no touch in three games: a sliver, not a share
         # quarterback carries belong to the quarterback who is taking the snaps
         db = f.gsis_id.map(R["db"]).fillna(0.0)
