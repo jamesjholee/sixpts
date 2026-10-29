@@ -272,10 +272,10 @@ function Replay({ game, gid }: { game: Game; gid: string }) {
 }
 
 export default function Sim({ week }: { week: number }) {
-  const [list, setList] = useState<Record<string, Game> | null>(null); const [err, setErr] = useState(''); const [note, setNote] = useState('')
+  const [list, setList] = useState<Record<string, Game> | null>(null); const [err, setErr] = useState(''); const [note, setNote] = useState(''); const [sheets, setSheets] = useState<string[]>([])
   const [sel, setSel] = useState<string>(() => new URLSearchParams(location.search).get('game') || '')
   const [full, setFull] = useState<Game | null>(null)
-  useEffect(() => { setList(null); setErr(''); fetch(`${API}/api/sim/${week}`).then(async r => { if (!r.ok) throw new Error(`No simulations for week ${week} yet — they're built with the Tuesday board.`); return r.json() }).then(d => { setList(d.games); setNote(d.note || '') }).catch(e => setErr(e.message)) }, [week])
+  useEffect(() => { setList(null); setErr(''); fetch(`${API}/api/sim/${week}`).then(async r => { if (!r.ok) throw new Error(`No simulations for week ${week} yet — they're built with the Tuesday board.`); return r.json() }).then(d => { setList(d.games); setNote(d.note || ''); setSheets(d.cheatsheets || []) }).catch(e => setErr(e.message)) }, [week])
   const gid = list ? (sel && list[sel] ? sel : Object.keys(list)[0]) : ''
   useEffect(() => { if (!gid) return; setFull(null); fetch(`${API}/api/sim/${week}/${gid}`).then(r => r.json()).then(d => setFull(d.game)).catch(() => {}) }, [week, gid])
   if (err) return <p className="empty">{err}</p>
@@ -283,6 +283,7 @@ export default function Sim({ week }: { week: number }) {
   const g = list[gid]; const top = [...g.players].sort((a, b) => b.p_td - a.p_td).slice(0, 10)
   const fav = g.spread < 0 ? `${g.home} ${g.spread}` : g.spread > 0 ? `${g.away} −${g.spread}` : 'pick'
   return (<div>
+    {sheets.length > 0 && <p className="muted" style={{ margin: '0 0 8px', fontSize: 13 }}>Week {week} cheat sheet (every offense's top-10 ranks, every defense's most/fewest allowed): {sheets.map((u, i) => <a key={u} href={u} target="_blank" rel="noreferrer" style={{ marginRight: 8 }}>page {i + 1} ↗</a>)}</p>}
     <div className="games">{Object.entries(list).map(([id, x]) => <button key={id} className={'game' + (gid === id ? ' on' : '')} aria-pressed={gid === id} onClick={() => setSel(id)}><b>{x.away} @ {x.home}</b><small>{x.home} {pc(x.p_home)} · {Math.round(x.median_away)}–{Math.round(x.median_home)}</small></button>)}</div>
     <div className="bar"><h1>{g.away} @ {g.home}</h1><span className="muted">{fav} · O/U {g.total}</span>
       {g.replay?.['9x16'] && <a className="btn" style={{ marginLeft: 'auto' }} href={g.replay['9x16']} download>Download for social ↓</a>}</div>

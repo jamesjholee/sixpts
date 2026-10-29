@@ -40,7 +40,7 @@ def run(season: int, weeks: list[int], n: int, scales: dict, verbose: bool = Tru
             gid = g["game"]; parts = gid.split("_"); away, home = parts[2], parts[3]
             r_home = next((r for r in rows if r["game_id"] == gid and r["team"] == home), None)
             if r_home is None: continue
-            spread = float(r_home["spread"]); total = float(g["total"])
+            spread = -float(r_home["spread"]); total = float(g["total"])   # board: + = favoured -> standard sign
             PH = sim.player_inputs(feat, home, names); PA = sim.player_inputs(feat, away, names)
             if not PH["ids"] or not PA["ids"]: continue
             out = sim.simulate(home, away, T, PH, PA, spread, total, n=n, seed=w * 100 + len(games), keep_log=False, **scales)

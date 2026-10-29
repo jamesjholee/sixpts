@@ -172,13 +172,13 @@ def _sim(week: int):
 
 def _replays(week: int) -> dict:
     f = DATA / f"replays_w{week}.json"
-    return json.load(open(f))["games"] if f.exists() else {}
+    return json.load(open(f)) if f.exists() else {"games": {}, "cheatsheets": []}
 
 @app.get("/api/sim/{week}")
 def sim_week(week: int):
     """Every game on the slate: outcome probabilities, quantiles, per-player distributions, replay video URLs when rendered. No play logs (see /api/sim/{week}/{game_id})."""
     d = _sim(week); rp = _replays(week)
-    return {**{k: v for k, v in d.items() if k != "games"}, "games": {g: {**{k: v for k, v in s.items() if k != "log"}, "replay": rp.get(g)} for g, s in d["games"].items()}}
+    return {**{k: v for k, v in d.items() if k != "games"}, "cheatsheets": rp.get("cheatsheets", []), "games": {g: {**{k: v for k, v in s.items() if k != "log"}, "replay": rp.get("games", {}).get(g)} for g, s in d["games"].items()}}
 
 @app.get("/api/sim/{week}/{game_id}")
 def sim_game(week: int, game_id: str):
