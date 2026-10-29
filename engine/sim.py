@@ -350,7 +350,7 @@ def simulate(home: str, away: str, T: dict, PH: dict, PA: dict, spread: float, t
 def _extract_log(L, score, out):
     """The game nearest the median score (home and away), as a list of renderer-ready plays."""
     mh, ma = np.median(score[:, 0]), np.median(score[:, 1])
-    g = int(np.argmin(np.abs(score[:, 0] - mh) + np.abs(score[:, 1] - ma) + 0.3 * np.abs((score[:, 0] + score[:, 1]) - (mh + ma))))
+    g = int(np.argmin(np.abs(score[:, 0] - mh) + np.abs(score[:, 1] - ma) + 0.3 * np.abs((score[:, 0] + score[:, 1]) - (mh + ma)) + 50 * (score[:, 0] == score[:, 1])))  # a tie is a poor "median game" to replay
     plays = []
     for st in L:
         pos = np.where(st["i"] == g)[0]
