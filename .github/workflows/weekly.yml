@@ -74,13 +74,14 @@ jobs:
           python3 engine/build_training.py --upcoming 2026 $WEEK
           python3 -m engine.score_week --season 2026 --week $WEEK
           python3 -m engine.team_profiles --season 2026 --week $WEEK
+          python3 -m engine.sim_week --season 2026 --week $WEEK || true
           echo "WEEK=$WEEK" >> $GITHUB_ENV
           if [ -n "$ODDS_API_KEY" ]; then python3 -m engine.odds_api --week $WEEK || true; fi
           if [ -n "$PF_COOKIE" ]; then python3 -m engine.pf_odds --week $WEEK --live || true; fi
       - name: Commit public boards so the deployed API serves them
         run: |
           git config user.name "sixpts-bot"; git config user.email "bot@sixpts.com"
-          git add -f data/board_w*_public.json data/teams_w*.json data/scorecard_w*.json || true
+          git add -f data/board_w*_public.json data/teams_w*.json data/scorecard_w*.json data/sim_w*.json || true
           git diff --cached --quiet || (git commit -m "boards: week ${WEEK} [skip ci]" && git push)
       - name: Upload boards
         uses: actions/upload-artifact@v4

@@ -83,6 +83,9 @@ export default function App() {
   // ---- data
   const [data, setData] = useState<Board | null>(null); const [err, setErr] = useState('')
   const [mkt, setMkt] = useState<Record<string, number>>({})
+  const [sims, setSims] = useState<Record<string, any>>({})   // game_id -> sim summary (no logs)
+  useEffect(() => { if (!week) return; fetch(`${API}/api/sim/${week}`).then(r => r.ok ? r.json() : null).then(d => setSims(d?.games || {})).catch(() => {}) }, [week])
+  const simFor = (r: Row) => { const g = sims[r.game_id]; if (!g) return null; const x = (g.players || []).find((p: any) => p.gsis_id === r.gsis_id); return x ? { p: x.p_td as number, p2: x.p_2td as number, g } : null }
   const [books, setBooks] = useState<BookMap>({}); const [moved, setMoved] = useState<Set<string>>(new Set()); const [mp, setMp] = useState<any>(null); const [tick, setTick] = useState(0); const [live, setLive] = useState<any[]>([]); const [freshTd, setFreshTd] = useState<Set<string>>(new Set())
   const [market, setMarket] = useState<'td' | 'rec'>('td')
   useEffect(() => {
@@ -394,6 +397,7 @@ export default function App() {
           <Stat k="def_rz_td_pct" v={r.def_rz_td_pct == null ? '—' : Math.round(r.def_rz_td_pct * 100) + '%'} /><Stat label="TDs / game to RB" v={n1(r.def_td_rb_pg)} /><Stat label="to WR" v={n1(r.def_td_wr_pg)} /><Stat label="to TE" v={n1(r.def_td_te_pg)} />{r.matchup_note && <Stat label="Coverage" v={r.matchup_note} />}</div>
         <div className="block"><h3>Game <b className={(r.c_environment ?? 0) >= 0 ? 'pos' : 'neg'}>{pts(r.c_environment)}</b></h3>
           {r.p_market != null && <Stat label="Market says" v={pct(r.p_market)} />}{r.p_market != null && <Stat label="We bet as" v={pct(r.p_bet)} />}
+          {(() => { const sm = simFor(r); return sm ? <><Stat label="Sim says (5,000 games)" v={`${pct(sm.p)} · 2+ TD ${pct(sm.p2)}`} /><Stat label="Sim game" v={`${sm.g.away} ${Math.round(sm.g.median_away)}–${sm.g.home} ${Math.round(sm.g.median_home)} · ${sm.g.home} wins ${pct(sm.g.p_home)}`} /></> : null })()}
           <Stat k="implied" v={r.implied.toFixed(1) + ' pts'} /><Stat label="Over / under" v={String(r.total)} /><Stat label="Spread" v={r.spread > 0 ? 'favored by ' + r.spread : 'underdog by ' + (-r.spread)} /></div>
       </div></>)
   }
