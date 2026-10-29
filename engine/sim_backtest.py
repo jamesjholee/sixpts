@@ -20,18 +20,23 @@ def run(season: int, weeks: list[int], n: int, scales: dict, verbose: bool = Tru
     p_cur = M.prep_pbp(pd.read_parquet(D / f"play_by_play_{season}.parquet"))
     feat_all = pd.read_parquet(D / "train.parquet"); feat_all = feat_all[feat_all.season == season]
     feat_all, _ = make_features(feat_all)
-    names = {}
+    names = {}; pfr2gsis = {}
     try:
-        pl = pd.read_parquet(D / "players.parquet"); names = dict(zip(pl.gsis_id, pl.display_name))
+        pl = pd.read_parquet(D / "players.parquet"); names = dict(zip(pl.gsis_id, pl.display_name)); pfr2gsis = dict(zip(pl.pfr_id, pl.gsis_id))
     except Exception: pass
+    snaps = pd.read_parquet(D / f"snap_counts_{season}.parquet") if (D / f"snap_counts_{season}.parquet").exists() and scales.get("use_snaps", True) else None
+    inj = pd.read_parquet(D / f"injuries_{season}.parquet") if (D / f"injuries_{season}.parquet").exists() and scales.get("use_inj", True) else None
+    ros = pd.read_parquet(D / f"roster_weekly_{season}.parquet") if (D / f"roster_weekly_{season}.parquet").exists() and scales.get("use_inj", True) else None
+    scales = {k: v for k, v in scales.items() if k not in ("use_snaps", "use_inj")}
     games, players = [], []
     for w in weeks:
         bf = D / f"board_w{w}_public.json"
         if not bf.exists(): print(f"no board for week {w}"); continue
         board = json.load(open(bf)); slate = board["slate"]; rows = board["board"]
-        T = sim.team_inputs(p_prior, p_cur[p_cur.week < w])
+        T = sim.team_inputs(p_prior, p_cur[p_cur.week < w]); recent = sim.recent_usage(p_cur, w, snaps=snaps, pfr2gsis=pfr2gsis); avail = sim.availability(inj, ros, w)
         feat = feat_all[feat_all.week == w]
         pw = p_cur[p_cur.week == w]
+        act_car = pw[pw.rush_attempt == 1].groupby("rusher_player_id").size(); act_tgt = pw[pw.pass_attempt == 1].groupby("receiver_player_id").size()
         actual = pw.groupby("game_id").agg(h=("home_score", "max"), a=("away_score", "max")) if "home_score" in pw else None
         scored = set(zip(pw[pw.touchdown == 1].td_player_id, pw[pw.touchdown == 1].game_id))
         played = set(pw.receiver_player_id.dropna()) | set(pw.rusher_player_id.dropna()) | set(pw.passer_player_id.dropna())
@@ -41,7 +46,7 @@ def run(season: int, weeks: list[int], n: int, scales: dict, verbose: bool = Tru
             r_home = next((r for r in rows if r["game_id"] == gid and r["team"] == home), None)
             if r_home is None: continue
             spread = -float(r_home["spread"]); total = float(g["total"])   # board: + = favoured -> standard sign
-            PH = sim.player_inputs(feat, home, names); PA = sim.player_inputs(feat, away, names)
+            PH = sim.player_inputs(feat, home, names, recent, avail); PA = sim.player_inputs(feat, away, names, recent, avail)
             if not PH["ids"] or not PA["ids"]: continue
             out = sim.simulate(home, away, T, PH, PA, spread, total, n=n, seed=w * 100 + len(games), keep_log=False, **scales)
             s = sim.summarize(out, spread, total)
@@ -53,7 +58,8 @@ def run(season: int, weeks: list[int], n: int, scales: dict, verbose: bool = Tru
             for x in s["players"]:
                 k = (x["gsis_id"], gid)
                 if x["gsis_id"] not in played and actual is not None: continue
-                players.append(dict(week=w, game=gid, player=x["player"], team=x["team"], pos=x["position"], p_sim=x["p_td"], p_gbm=gbm.get(k, np.nan), y=int(k in scored)))
+                players.append(dict(week=w, game=gid, player=x["player"], team=x["team"], pos=x["position"], p_sim=x["p_td"], p_gbm=gbm.get(k, np.nan), y=int(k in scored),
+                                    car_sim=x["car"], tgt_sim=x.get("tgt", x["rec"]), car_act=float(act_car.get(x["gsis_id"], 0)), tgt_act=float(act_tgt.get(x["gsis_id"], 0))))
     G = pd.DataFrame(games); P = pd.DataFrame(players)
     rep = {}
     if len(G):
@@ -71,6 +77,10 @@ def run(season: int, weeks: list[int], n: int, scales: dict, verbose: bool = Tru
         rep["players"] = len(P2); rep["td_rate_actual"] = float(y.mean()); rep["td_rate_sim"] = float(P2.p_sim.mean()); rep["td_rate_gbm"] = float(P2.p_gbm.mean())
         rep["auc_sim"] = float(roc_auc_score(y, P2.p_sim)); rep["auc_gbm"] = float(roc_auc_score(y, P2.p_gbm)); rep["auc_blend"] = float(roc_auc_score(y, 0.5 * P2.p_sim + 0.5 * P2.p_gbm))
         rep["logloss_sim"] = float(log_loss(y, P2.p_sim.clip(1e-3, 1 - 1e-3))); rep["logloss_gbm"] = float(log_loss(y, P2.p_gbm.clip(1e-3, 1 - 1e-3))); rep["logloss_blend"] = float(log_loss(y, (0.5 * P2.p_sim + 0.5 * P2.p_gbm).clip(1e-3, 1 - 1e-3)))
+        # usage: projected carries / targets vs actual, for players the sim gives at least one touch
+        U = P[(P.car_sim + P.tgt_sim) >= 1.0]
+        rep["usage_n"] = len(U); rep["usage_mae_car"] = float((U.car_sim - U.car_act).abs().mean()); rep["usage_mae_tgt"] = float((U.tgt_sim - U.tgt_act).abs().mean())
+        rep["usage_corr_car"] = float(np.corrcoef(U.car_sim, U.car_act)[0, 1]); rep["usage_corr_tgt"] = float(np.corrcoef(U.tgt_sim, U.tgt_act)[0, 1])
         P2["band"] = pd.cut(P2.p_sim, [0, .05, .1, .2, .3, .45, .6, 1.0])
         rep["calibration"] = P2.groupby("band", observed=True).agg(n=("y", "size"), sim=("p_sim", "mean"), gbm=("p_gbm", "mean"), actual=("y", "mean")).round(3)
         rep["by_pos"] = P2.groupby("pos").agg(n=("y", "size"), sim=("p_sim", "mean"), gbm=("p_gbm", "mean"), actual=("y", "mean")).round(3)

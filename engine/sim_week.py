@@ -21,10 +21,22 @@ def main(season: int, week: int, n: int):
     board = json.load(open(D / f"board_w{week}_public.json")); rows, slate = board["board"], board["slate"]
     p_prior = M.prep_pbp(ingest.load_pbp(season - 1)); p_cur = M.prep_pbp(ingest.load_pbp(season, force=True))
     T = sim.team_inputs(p_prior, p_cur[p_cur.week < week])
-    feat = pd.read_parquet(D / f"upcoming_w{week}.parquet"); feat, _ = make_features(feat); feat = feat[(feat.season == season) & (feat.week == week)]
-    names = {}
-    try: pl = pd.read_parquet(ingest.nflverse_file("players/players.parquet")); names = dict(zip(pl.gsis_id, pl.display_name))
+    pl = None
+    try: pl = pd.read_parquet(ingest.nflverse_file("players/players.parquet"))
     except Exception: pass
+    pfr2gsis = dict(zip(pl.pfr_id, pl.gsis_id)) if pl is not None else {}
+    snaps = inj = ros = None
+    try: snaps = ingest.load_snaps(season)
+    except Exception as e: print("snap counts unavailable:", e)
+    try: inj = pd.read_parquet(ingest.nflverse_file(f"injuries/injuries_{season}.parquet", force=True))
+    except Exception as e: print("injuries unavailable:", e)
+    try: ros = pd.read_parquet(ingest.nflverse_file(f"weekly_rosters/roster_weekly_{season}.parquet", force=True))
+    except Exception as e: print("rosters unavailable:", e)
+    recent = sim.recent_usage(p_cur, week, snaps=snaps, pfr2gsis=pfr2gsis); avail = sim.availability(inj, ros, week)
+    n_out = sum(1 for v in avail.values() if v == 0); n_q = sum(1 for v in avail.values() if 0 < v < 1)
+    print(f"availability: {n_out} players out/inactive, {n_q} reduced (questionable / did not practice)")
+    feat = pd.read_parquet(D / f"upcoming_w{week}.parquet"); feat, _ = make_features(feat); feat = feat[(feat.season == season) & (feat.week == week)]
+    names = dict(zip(pl.gsis_id, pl.display_name)) if pl is not None else {}
     names.update({r["gsis_id"]: r["player"] for r in rows})
     gbm = {(r["gsis_id"], r["game_id"]): r["p_model"] for r in rows}
     games = {}
@@ -33,7 +45,7 @@ def main(season: int, week: int, n: int):
         r_home = next((r for r in rows if r["game_id"] == gid and r["team"] == home), None)
         if r_home is None: continue
         spread, total = -float(r_home["spread"]), float(g["total"])   # board stores + = favoured; the sim takes the standard sign (- = home favoured)
-        PH = sim.player_inputs(feat, home, names); PA = sim.player_inputs(feat, away, names)
+        PH = sim.player_inputs(feat, home, names, recent, avail); PA = sim.player_inputs(feat, away, names, recent, avail)
         if not PH["ids"] or not PA["ids"]: print(f"skip {gid}: no players"); continue
         out = sim.simulate(home, away, T, PH, PA, spread, total, n=n, seed=season * 1000 + week * 50 + i, keep_log=True)
         s = sim.summarize(out, spread, total)

@@ -254,3 +254,27 @@ from nflverse play-by-play through the previous week. Four games a page, 1600×2
 replays; `/api/sim/{week}` lists the pages and the Sim tab links them. Spot-checked against a published
 third-party sheet for week 8: yardage, points and TD figures match to the decimal; fantasy columns differ only by
 scoring format.
+
+**Usage realism (same week).** Reviewing the CAR@GB replay: a backup QB took the first carry of the game and five
+Carolina backs split carries, when the real last three games were Hubbard 20·28·7 with Etienne and Tyus only
+appearing in week 7. Shares had been season-to-date blended with last season, plus a 20% uniform mix across the
+roster, and every snap draws independently. Now `recent_usage` (recency-weighted shares over the team's last three
+games, weights 3·2·1) carries 65% of each share, a player with no touch in those games keeps 15% of his old share,
+quarterback carries go only to the QB taking the dropbacks, and the uniform mix is 6% over players actually used.
+CAR sim after: Hubbard 14.6 carries, Etienne 3.4, Tyus 2.6, Brooks ~0. W1–7 backtest unchanged on scorers
+(sim AUC .681, blend .692, sim log-loss .503 → .498).
+
+**Injuries, snap counts, and grading the usage model (same week).** Two nflverse feeds now feed the sim, both
+walk-forward: the weekly injury report (`availability()`: Out/Doubtful/IR/inactive → share removed and handed to
+the same position group; Questionable → ×0.6; did-not-practice with no game status yet → ×0.75) and official snap
+counts (`recent_usage(..., snaps)`: each player's touches per snap over his last three games × his projected snap
+share, blended 50/50 with the raw touch share). The Sunday 8am rerun of the board re-sims with Friday's final report.
+The backtest now grades usage itself — projected carries/targets vs actual for every player the sim gives a touch —
+and the three weights were fitted on that grade (W2–7, n=400): `RECENT_W 0.5`, `SNAP_W 0.5`, `UNIFORM_MIX 0.06`.
+Effect W2–7: carries corr .886 → .891, targets corr .685 → .696, sim TD log-loss .4921 → .4905; small, in the right
+direction, and the high-impact case (a starter ruled Out on Friday) barely occurs in six weeks of data.
+`engine/sim_grade.py` scores each week's *published* sim after the games (totals/margins vs market and actual,
+favourite-won %, usage MAE/corr, P(TD) Brier/AUC vs the model, and the eight biggest usage misses by name) and
+`score_card` stores it under `sim` in the weekly scorecard. Week 7: usage carries corr .884, targets .749; biggest
+misses were in-game exits and blowouts (Aaron Jones 24.8 → 9, Dobbins 17.8 → 6, Hubbard 20.2 → 12) — the thing a
+pre-game model cannot know, which is the honest ceiling on this.
