@@ -3,28 +3,48 @@ on:
   schedule:
     - cron: "0 11 * * 2"      # Tuesday 07:00 ET — grade last week, score next week
     - cron: "0 12 * * 4,6,0"  # Thu/Sat/Sun — rescore with the latest injury report + lines
-    - cron: "10 16 * * 0"     # Sunday 12:10 ET — odds only, AFTER the 11:30 ET inactives. Books pull scratched
-                              # players' markets, so this fetch is the activity check the Longshot tier keys on.
+    # Odds-only refreshes AFTER inactives post (90 min before kickoff). Books pull scratched players' markets, so
+    # these fetches are the activity check the Longshot tier keys on. GitHub delays scheduled runs by minutes to
+    # hours (week 7: the 12:10 ET job started at 3:00 pm), so several crons cover each window and the job itself
+    # exits unless the clock is inside the window. Each run that fetches costs ~16 Odds API credits.
+    - cron: "50 15 * * 0"     # Sun 11:50 ET  } Sunday 1 pm games: window 11:45-12:50 ET
+    - cron: "5 16 * * 0"      # Sun 12:05 ET  }
+    - cron: "20 16 * * 0"     # Sun 12:20 ET  }
+    - cron: "35 16 * * 0"     # Sun 12:35 ET  }
+    - cron: "20 19 * * 0"     # Sun 3:20 ET   } Sunday 4:05/4:25 games: window 3:10-4:10 ET
+    - cron: "40 19 * * 0"     # Sun 3:40 ET   }
+    - cron: "5 23 * * 0"      # Sun 7:05 ET   } Sunday night: window 6:55-8:05 ET
+    - cron: "30 23 * * 0"     # Sun 7:30 ET   }
+    - cron: "5 23 * * 1,4"    # Mon/Thu 7:05 ET } MNF / TNF: window 6:55-8:05 ET
+    - cron: "30 23 * * 1,4"   # Mon/Thu 7:30 ET }
   workflow_dispatch:
     inputs: { week: { description: "NFL week", required: true } }
 jobs:
   gameday-odds:
-    if: github.event.schedule == '10 16 * * 0'
+    if: github.event_name == 'schedule' && !contains(fromJSON('["0 11 * * 2","0 12 * * 4,6,0"]'), github.event.schedule)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - run: pip install -r requirements.txt
-      - name: Refresh odds after inactives
+      - name: Refresh odds after inactives (only inside a post-inactives window)
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
         run: |
-          WEEK=$(python -c "import datetime as d;print(max(1,(d.date.today()-d.date(2026,9,8)).days//7+1))")
-          if [ -n "$ODDS_API_KEY" ]; then python3 -m engine.odds_api --week $WEEK; fi
+          python3 - <<'PY'
+          import datetime as d, os, subprocess, sys, zoneinfo
+          now = d.datetime.now(zoneinfo.ZoneInfo("America/New_York")); hm = now.hour * 60 + now.minute; dow = now.weekday()  # Mon=0
+          windows = {6: [(11*60+45, 12*60+50), (15*60+10, 16*60+10), (18*60+55, 20*60+5)], 0: [(18*60+55, 20*60+5)], 3: [(18*60+55, 20*60+5)]}
+          inside = any(a <= hm <= b for a, b in windows.get(dow, []))
+          print(f"now {now:%a %H:%M} ET -> {'inside' if inside else 'outside'} a post-inactives window")
+          if not inside: sys.exit(0)
+          week = max(1, (now.date() - d.date(2026, 9, 8)).days // 7 + 1)
+          if os.environ.get("ODDS_API_KEY"): sys.exit(subprocess.call([sys.executable, "-m", "engine.odds_api", "--week", str(week)]))
+          PY
   run:
-    if: github.event.schedule != '10 16 * * 0'
+    if: github.event_name == 'workflow_dispatch' || contains(fromJSON('["0 11 * * 2","0 12 * * 4,6,0"]'), github.event.schedule)
     runs-on: ubuntu-latest
     permissions:
       contents: write
